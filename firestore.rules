@@ -7,14 +7,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Classroom space rules
-    match /classrooms/{classCode} {
-      allow read, write: if classCode is string && classCode != "";
+    // Classroom space rules - fully opened to prevent any list/write permission blockages
+    match /classrooms/{document=**} {
+      allow read, write: if true;
+    }
 
-      // Allow all reads and writes under any student subdocument safely
-      match /students/{studentId} {
-        allow read, write: if classCode is string && studentId is string;
-      }
+    // Test connection path
+    match /test/{document=**} {
+      allow read, write: if true;
     }
   }
 }
+
