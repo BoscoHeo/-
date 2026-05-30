@@ -86,6 +86,26 @@ export default function App() {
     }
   }, []);
 
+  // Synchronize active classroom apiConfig on boot or code loading
+  useEffect(() => {
+    if (!classCode) return;
+    const fetchClassroomConfig = async () => {
+      try {
+        const docSnap = await getDoc(doc(db, 'classrooms', classCode));
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.apiConfig) {
+            setApiConfig(data.apiConfig);
+            localStorage.setItem('ai_evaluator_config', JSON.stringify(data.apiConfig));
+          }
+        }
+      } catch (err) {
+        console.error("Error loading classroom config from Firestore:", err);
+      }
+    };
+    fetchClassroomConfig();
+  }, [classCode]);
+
   // Sync state to LocalStorage for offline cache convenience
   useEffect(() => {
     if (students.length > 0) {
@@ -146,7 +166,8 @@ export default function App() {
       await setDoc(doc(db, 'classrooms', code), {
         code,
         name: tempClassName.trim(),
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        apiConfig: apiConfig
       });
 
       setClassCode(code);
@@ -182,6 +203,11 @@ export default function App() {
         setClassName(rName);
         localStorage.setItem('teacher_class_code', enteredCode);
         localStorage.setItem('teacher_class_name', rName);
+
+        if (data.apiConfig) {
+          setApiConfig(data.apiConfig);
+          localStorage.setItem('ai_evaluator_config', JSON.stringify(data.apiConfig));
+        }
 
         // Update history list
         const updatedHistory = [{ code: enteredCode, name: rName }, ...recentClasses.filter(c => c.code !== enteredCode)].slice(0, 10);
@@ -600,9 +626,20 @@ export default function App() {
   };
 
   // Configuration Modal Save
-  const handleSaveConfig = (newConfig: AIServiceConfig) => {
+  const handleSaveConfig = async (newConfig: AIServiceConfig) => {
     setApiConfig(newConfig);
     localStorage.setItem('ai_evaluator_config', JSON.stringify(newConfig));
+
+    if (classCode) {
+      try {
+        await setDoc(doc(db, 'classrooms', classCode), {
+          apiConfig: newConfig
+        }, { merge: true });
+        console.log("Successfully persisted apiConfig to Firestore for classroom:", classCode);
+      } catch (err) {
+        console.error("Error persisting apiConfig to Firestore:", err);
+      }
+    }
   };
 
   return (

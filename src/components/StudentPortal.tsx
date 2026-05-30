@@ -15,6 +15,9 @@ interface StudentPortalProps {
 }
 
 export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortalProps) {
+  // --- Active AI Config loaded from Firestore or passed as prop ---
+  const [activeApiConfig, setActiveApiConfig] = useState<AIServiceConfig>(apiConfig);
+
   // --- Class Code States for Firestore Separation ---
   const [classCode, setClassCode] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -58,6 +61,9 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
           const data = docSnap.data();
           setClassRoomName(data.name || '우리 학급');
           setIsClassValid(true);
+          if (data.apiConfig) {
+            setActiveApiConfig(data.apiConfig);
+          }
         } else {
           setIsClassValid(false);
         }
@@ -158,7 +164,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
       const rawLetter = await generateAIConsult({
         student: studentPayload,
         type: 'feedback',
-        config: apiConfig
+        config: activeApiConfig
       });
 
       setGeneratedLetter(rawLetter);

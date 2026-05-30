@@ -22,8 +22,12 @@ export async function generateAIConsult({
     }
     
     // If backend returns 404 (means running on Netlify/static hosting) and user has a custom API key
-    if (res.status === 404 && config.service !== 'built-in' && config.apiKey) {
-      console.warn("Express backend API endpoint not found. Falling back to direct client-side generation.");
+    if (res.status === 404) {
+      if (config.service !== 'built-in' && config.apiKey) {
+        console.warn("Express backend API endpoint not found. Falling back to direct client-side generation.");
+      } else {
+        throw new Error("서버 생성 실패 (404) -- Netlify 등의 정적 호스팅 환경인 경우, 우측 상단의 'AI 서비스 설정'에서 개별 API Key(Gemini 또는 OpenAI)를 입력하고 저장하셔야 학생 기기 및 외부 기기에서도 직접 안전하게 생성 기능이 작동합니다.");
+      }
     } else {
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.error || `서버 생성 실패 (${res.status})`);
