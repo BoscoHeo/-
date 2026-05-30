@@ -66,13 +66,38 @@ const DEFAULT_SAMPLES: Student[] = [
 
 let sharedStudentsStore: Student[] = [...DEFAULT_SAMPLES];
 
-// Initialize the default GoogleGenAI SDK using process.env.GEMINI_API_KEY
+// Initialize the default GoogleGenAI SDK using dynamic key finder
 let defaultAiClient: GoogleGenAI | null = null;
 
+function findGeminiApiKey(): string | undefined {
+  const directKeys = [
+    'GEMINI_API_KEY',
+    'GEMINI_KEY',
+    'GOOGLE_API_KEY',
+    'GOOGLE_GENAI_API_KEY',
+    'VITE_GEMINI_API_KEY',
+    'VITE_GOOGLE_API_KEY'
+  ];
+  for (const k of directKeys) {
+    if (process.env[k]) return process.env[k];
+  }
+
+  // Dynamic scan for anything containing GEMINI or GOOGLE_API
+  for (const k of Object.keys(process.env)) {
+    if (k.toUpperCase().includes('GEMINI') || k.toUpperCase().includes('GOOGLE_API') || k.toUpperCase().includes('GOOGLE_GENAI')) {
+      const val = process.env[k];
+      if (val && val.trim().length > 10) {
+        return val.trim();
+      }
+    }
+  }
+  return undefined;
+}
+
 function getGeminiClient(customKey?: string): GoogleGenAI {
-  const apiKey = customKey || process.env.GEMINI_API_KEY;
+  const apiKey = customKey || findGeminiApiKey();
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY environment variable is missing and no custom key was provided.");
+    throw new Error("환경변수 등 등록된 어떠한 Gemini API 키도 발견하지 못했습니다. 키가 정확하게 추가되어 있는지 대시보드를 확인하세요.");
   }
   return new GoogleGenAI({
     apiKey: apiKey,
@@ -88,7 +113,7 @@ function getGeminiClient(customKey?: string): GoogleGenAI {
 app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
-    hasBuiltInGeminiKey: !!process.env.GEMINI_API_KEY,
+    hasBuiltInGeminiKey: !!findGeminiApiKey(),
   });
 });
 
@@ -198,7 +223,7 @@ app.post("/api/generate", async (req, res) => {
 5. 학습 태도와 관련된 사항은 가급적 문장의 초반에 기재하고, 예체능 능력이나 특기사항 등이 있다면 가장 마지막(어미부)에 자연스럽게 이어지게 마무리합니다.
 6. 전체 문장의 길이는 공백 포함 300자 이상 400자 이하로 적절히 맞추고, 중간에 불필요한 줄바꿈(엔터)이나 마크다운(#, *, -, \` 등)은 절대 사용하지 말고 연속된 긴 단락 하나로 작성해 주어야 합니다.
 7. '학생은' 또는 '이 학생은', '그는'과 같은 상투적인 주어는 문맥상 자연스럽게 생략하고 서술어 중심의 주격 생략 형태로 기재합니다.
-8. 학생이 작성한 자기평가 내용(${selfDescription})을 자연스럽게 분석하고 수렴하여, 본인의 성찰 성향을 좋게 반영해 줍니다.`;
+8. 학생이 작성한 자기평가 내용(${selfDescription || "없음"})을 자연스럽게 분석하고 수렴하여, 본인의 성찰 성향을 좋게 반영해 줍니다.`;
     } else {
       // Counselor Feedback (학생 성장을 돕는 상담/성장 조언)
       systemInstruction = "너는 교육심리학적 전문성과 다정한 위로 능력을 갖춘 대한민국의 따뜻한 전문 상담교사(클래스 멘토)야.";
@@ -260,13 +285,13 @@ app.post("/api/generate", async (req, res) => {
     } else {
       // Call Gemini via official SDK (built-in or custom key)
       const isCustom = targetService === "custom-gemini";
-      const geminiKey = isCustom ? customKey : process.env.GEMINI_API_KEY;
+      const geminiKey = isCustom ? customKey : findGeminiApiKey();
 
       if (!geminiKey) {
         res.status(400).json({
           error: isCustom 
             ? "사용자정의 Gemini API 키가 입력되지 않았습니다. 설정 모달에서 입력하시거나 '기본 탑재 AI'로 전환하세요." 
-            : "서버에 기본 탑재된 GEMINI_API_KEY가 없습니다. '설정' 탭에서 본인의 API 키를 등록하여 이용하세요."
+            : "서버에 감지된 기본 탑재 또는 시스템 일치 Gemini API 키 환경변수가 없습니다. '설정 > Secrets' 탭에서 본인의 API 키를 올바르게 등록하고 사용해 보세요."
         });
         return;
       }

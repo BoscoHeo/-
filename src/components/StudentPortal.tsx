@@ -161,11 +161,19 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
 
       // 2. Generate customized personal AI Growth Letter
       setLoadingStepText("AI 선생님이 마음을 가득 담아 소중한 다정다감 편지를 정성껏 적고 있습니다...");
-      const rawLetter = await generateAIConsult({
-        student: studentPayload,
-        type: 'feedback',
-        config: activeApiConfig
-      });
+      
+      let rawLetter = '';
+      try {
+        rawLetter = await generateAIConsult({
+          student: studentPayload,
+          type: 'feedback',
+          config: activeApiConfig
+        });
+      } catch (aiErr: any) {
+        console.warn("AI letter generation failed but student data is saved:", aiErr);
+        // Resolute elegant fallback text so the student always moves forward and doesn't get blocked
+        rawLetter = `${name.trim()}아! 선생님과 AI 분석 서버가 현재 일시 작업 분주 상태여서 다정다감 편지가 잠시 지연되었지만, 네가 스스로를 돌아보며 깊이 적어 준 예쁜 강점(${selectedStrengths.map(s => s.trait).join(', ')})과 발전 다짐은 우리 선생님의 담임교사 나이스 대시보드 기획실에 실시간으로 아주 안전하고 깔끔하게 인계되었단다! \n\n조만간 우리 영리한 선생님께서 네 글을 미소 지으며 보시고 너를 위해 세상에 하나뿐인 멋진 격려와 함께 생활기록부를 더욱 아름답게 가꾸어 주실 거야. 오늘 장단점 돌아보느라 참 수고 많았고 성실하게 잘 참여해 줘서 고마워! 화이팅! 💗`;
+      }
 
       setGeneratedLetter(rawLetter);
 
