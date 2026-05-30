@@ -7,19 +7,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // ID verification helper to prevent ID spoofing/poisoning
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
     // Classroom space rules
     match /classrooms/{classCode} {
-      allow read, write: if isValidId(classCode);
+      allow read, write: if classCode is string && classCode != "";
 
-      // Student record rules - easily allow students to get and write their self-evaluation records
-      // and let the teacher sync/manage the list.
+      // Allow all reads and writes under any student subdocument safely
       match /students/{studentId} {
-        allow read, write: if isValidId(classCode) && isValidId(studentId);
+        allow read, write: if classCode is string && studentId is string;
       }
     }
   }

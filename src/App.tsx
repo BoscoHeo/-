@@ -46,6 +46,7 @@ export default function App() {
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [isPrintPreview, setIsPrintPreview] = useState(false);
   const [showCopyUrlTip, setShowCopyUrlTip] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // --- Temporary Form States for Adding Students ---
   const [newStudentName, setNewStudentName] = useState('');
@@ -147,6 +148,39 @@ export default function App() {
 
     return () => unsubscribe();
   }, [appMode, classCode]);
+
+  const handleManualSync = async () => {
+    if (!classCode) return;
+    setIsSyncing(true);
+    try {
+      const studentsCollectionRef = collection(db, 'classrooms', classCode, 'students');
+      const qSnap = await getDocs(studentsCollectionRef);
+      const dbStudents: Student[] = [];
+      qSnap.forEach((docSnap) => {
+        dbStudents.push(docSnap.data() as Student);
+      });
+      
+      dbStudents.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+      setStudents(dbStudents);
+      
+      if (dbStudents.length > 0) {
+        setSelectedStudentId(prev => {
+          if (!prev || !dbStudents.some(s => s.id === prev)) {
+            return dbStudents[0].id;
+          }
+          return prev;
+        });
+      } else {
+        setSelectedStudentId(null);
+      }
+      alert(`클라우드 학급 보관소 실시간 강제 수집 성공! 현재까지 제출을 마친 ${dbStudents.length}명의 모든 데이터가 완벽 동기화되었습니다.`);
+    } catch (err: any) {
+      console.error("Manual sync error:", err);
+      alert(`데이터 동기화 실패: ${err.message || '네트워크를 점검해 보세요.'}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Classroom handler helpers
   const handleCreateClassroom = async () => {
@@ -985,6 +1019,14 @@ export default function App() {
                   {window.location.origin}/?mode=student&class={classCode}
                 </div>
                 <button
+                  onClick={handleManualSync}
+                  disabled={isSyncing}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-3xs cursor-pointer flex items-center gap-1.5 transition-all text-center shrink-0 disabled:opacity-50"
+                >
+                  <RefreshCw size={11} className={isSyncing ? "animate-spin" : ""} />
+                  {isSyncing ? "동기화 중..." : "서버 동기화 새로고침"}
+                </button>
+                <button
                   onClick={() => {
                     navigator.clipboard.writeText(`${window.location.origin}/?mode=student&class=${classCode}`);
                     alert("우리 반 전용 학생 자가조사 및 성장 편지제출 링크가 복사되었습니다! 알리미, 구글 클래스룸 또는 스마트칠판 등에 배포해 주세요.");
@@ -1109,7 +1151,19 @@ export default function App() {
               {/* Left Column: Student List Selection Panel (lg:col-span-4) */}
               <section className="lg:col-span-4 bg-white border border-slate-100 rounded-2xl shadow-2xs flex flex-col overflow-hidden min-h-0">
                 <div className="p-4 border-b border-slate-100 space-y-3">
-                  <span className="text-xs font-bold text-slate-800">📋 가동 학급 학생부 ({students.length}명)</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-slate-800">📋 가동 학급 학생부 ({students.length}명)</span>
+                    <button
+                      type="button"
+                      onClick={handleManualSync}
+                      disabled={isSyncing}
+                      className="text-[11px] font-bold text-emerald-600 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                      title="클라우드 동기화 새로고침"
+                    >
+                      <RefreshCw size={10} className={isSyncing ? "animate-spin" : ""} />
+                      {isSyncing ? "연동 중" : "실시간 수집"}
+                    </button>
+                  </div>
                   
                   {/* Enter individual student name form */}
                   <form onSubmit={handleAddStudent} className="flex gap-2">
