@@ -74,8 +74,11 @@ export async function generateAIConsult({
 자기평가: ${selfDescription || "없음"}
 
 [중요 작성 규칙]
-1. 격려가 가득 담긴 친근한 반말/대화체('~길 바랄게', '~고마워', '~응원할게')로 다정하게 말해줘.
-2. 300자 내외로 따뜻하고 문학적으로 작성해 줘.`;
+1. 격려가 가득 담긴 친근하고 정겨운 대화체(반말, 예: '~하길 바랄게', '~하는 모습이 정말 멋져', '~선생님은 너의 성장을 응원해')로 은은하고 다정하게 말해줘.
+2. 이름(${name})을 본문에 자연스럽게 부르되, 문장이 딱딱하지 않고 부드럽게 흐르도록 작성해야 해.
+3. 강점을 진심으로 축하하고 극찬해 주며, 약점은 보완할 수 있는 긍정적인 방향의 성장 미션으로 따뜻하게 감싸 안아줘.
+4. 편지의 끝부분에 아무런 문맥 없이 기계적으로 '고마워, [이름]아!' 혹은 '인사하고 끝내기'처럼 뜬금없는 감사 인사나 어색한 구절을 붙여 마무리하지 말고, 학생의 자존감을 키우는 진정성 넘치는 덕담과 따뜻한 다짐 및 응원 문장으로 세련되고 마음 깊이 마무리해 줘.
+5. 중간에 마크다운 기호(*, #, \` 등)는 일체 제외하고, 가독성 좋은 줄바꿈과 넉넉하고 편안한 단락 구성으로 300자 내외로 작성해 줘.`;
   }
 
   if (config.service === 'custom-openai') {
@@ -103,18 +106,36 @@ export async function generateAIConsult({
   } else {
     // Default: Gemini Custom Direct REST fetch endpoint
     const model = config.model || "gemini-3.5-flash";
+    
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.apiKey}`;
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: `${systemInstruction}\n\n${prompt}` }] }],
-        generationConfig: { temperature: 0.7 }
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        systemInstruction: {
+          parts: [{ text: systemInstruction }]
+        },
+        generationConfig: { 
+          temperature: 0.7 
+        }
       })
     });
+    
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`Gemini API 에러: ${text}`);
+      let detailedMsg = text;
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed.error?.message) {
+          detailedMsg = parsed.error.message;
+        } else if (parsed.error) {
+          detailedMsg = typeof parsed.error === 'object' ? JSON.stringify(parsed.error) : parsed.error;
+        }
+      } catch (e) {
+        // Not valid JSON, keep raw text
+      }
+      throw new Error(`Gemini API 에러: ${detailedMsg}`);
     }
     const resData = await response.json();
     return resData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
