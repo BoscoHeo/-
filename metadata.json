@@ -1,0 +1,6 @@
+{
+  "name": "행동특성 종합의견 AI 평가기",
+  "description": "학생들의 자기평가 및 핵심 강점과 약점을 바탕으로 고품질의 학교생활기록부 행동특성 종합의견 및 친근하고 진솔한 일대일 상담 피드백을 자동으로 생성하고 일괄 관리하는 교사용 AI 평가 도구입니다.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

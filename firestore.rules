@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Catch-all default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ID verification helper to prevent ID spoofing/poisoning
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Classroom space rules
+    match /classrooms/{classCode} {
+      allow read, write: if isValidId(classCode);
+
+      // Student record rules - easily allow students to get and write their self-evaluation records
+      // and let the teacher sync/manage the list.
+      match /students/{studentId} {
+        allow read, write: if isValidId(classCode) && isValidId(studentId);
+      }
+    }
+  }
+}

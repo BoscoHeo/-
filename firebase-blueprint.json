@@ -1,0 +1,90 @@
+{
+  "entities": {
+    "Classroom": {
+      "title": "Classroom",
+      "description": "A classroom space created by a teacher, containing a unique access code",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Unique alphanumeric classroom identifier code"
+        },
+        "name": {
+          "type": "string",
+          "description": "Class name, e.g., 1학년 3반"
+        },
+        "teacherUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the teacher"
+        },
+        "teacherEmail": {
+          "type": "string",
+          "description": "Email of the teacher who created the classroom"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["code", "name", "createdAt"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Student roster item representing student details, self-evaluation, and AI-generated outputs",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Student unique identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Student name"
+        },
+        "selfDescription": {
+          "type": "string",
+          "description": "Student self-evaluation short statement"
+        },
+        "strengths": {
+          "type": "array",
+          "description": "List of selected strength traits with ratings"
+        },
+        "weaknesses": {
+          "type": "array",
+          "description": "List of selected improvement traits with ratings"
+        },
+        "evaluation": {
+          "type": "string",
+          "description": "NEIS character report behavioral draft text"
+        },
+        "feedback": {
+          "type": "string",
+          "description": "AI counselor growth advice/letter text"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["idle", "generating", "completed", "error"]
+        },
+        "errorMsg": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "name", "status"]
+    }
+  },
+  "firestore": {
+    "/classrooms/{classCode}": {
+      "schema": "Classroom",
+      "description": "Master document representing a teacher's classroom"
+    },
+    "/classrooms/{classCode}/students/{studentId}": {
+      "schema": "Student",
+      "description": "Roster and evaluation files of all students registered in a classroom"
+    }
+  }
+}
