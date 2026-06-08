@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react';
 import { Student, TraitItem, AIServiceConfig } from '../types';
 import { PRESET_TRAITS } from '../data/presets';
 import { db } from '../firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { generateAIConsult } from '../utils/ai';
 import { 
   Sparkles, Award, ShieldAlert, BookOpen, Send, HelpCircle, 
-  Heart, Check, RefreshCw, Copy, Printer, Home, ArrowRight, ArrowLeft 
+  Heart, Check, RefreshCw, Copy, Printer, Home, ArrowRight, ArrowLeft, Clock
 } from 'lucide-react';
 
 interface StudentPortalProps {
@@ -44,6 +44,32 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
   const [generatedLetter, setGeneratedLetter] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
+
+  // --- New Student Lookup & Release Verification States ---
+  const [existingStudent, setExistingStudent] = useState<Student | null>(null);
+  const [showExistingAlert, setShowExistingAlert] = useState<boolean>(false);
+  const [isCheckingExisting, setIsCheckingExisting] = useState<boolean>(false);
+  const [currentActiveStudent, setCurrentActiveStudent] = useState<Student | null>(null);
+
+  // --- Password & Security States ---
+  const [studentPassword, setStudentPassword] = useState('');
+  const [passwordPrefilled, setPasswordPrefilled] = useState(false);
+
+  // Auto-fill password if name and classCode exist in localStorage
+  useEffect(() => {
+    const trimmed = name.trim();
+    if (trimmed && classCode) {
+      const savedPass = localStorage.getItem(`class_auth_${classCode}_${trimmed}`);
+      if (savedPass) {
+        setStudentPassword(savedPass);
+        setPasswordPrefilled(true);
+      } else {
+        setPasswordPrefilled(false);
+      }
+    } else {
+      setPasswordPrefilled(false);
+    }
+  }, [name, classCode]);
 
   // --- Effect: Validate Class Code on load or change ---
   useEffect(() => {
@@ -142,22 +168,31 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
     setErrorMessage(null);
     setLoadingStepText("작성한 내용을 실시간 학급 기록실 서버에 안전하게 보관하고 있습니다...");
 
-    const studentId = `student-${Date.now()}`;
+    const studentId = currentActiveStudent?.id || `student-${Date.now()}`;
     const studentPayload: Student = {
       id: studentId,
       name: name.trim(),
       selfDescription: selfDescription.trim(),
       strengths: selectedStrengths,
       weaknesses: selectedWeaknesses,
-      evaluation: '', // Left blank for teacher to generate later
+      evaluation: currentActiveStudent?.evaluation || '', // Keep existing teacher evaluation if editing
       feedback: '',   // Empty as AI will generate it now
-      status: 'generating'
+      status: 'generating',
+      isFeedbackSent: currentActiveStudent?.isFeedbackSent || false, // Keep sent status if editing
+      password: studentPassword || '' // 저장한 비밀번호 정보
     };
 
     try {
       // 1. Direct Save to Firestore under subcollection classrooms/{classCode}/students/
       const studentDocRef = doc(db, 'classrooms', classCode, 'students', studentId);
       await setDoc(studentDocRef, studentPayload);
+
+      // Save password and name locally to remember this student's ownership
+      try {
+        localStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
+      } catch (locErr) {
+        console.warn("LocalStorage caching failed:", locErr);
+      }
 
       // 2. Generate customized personal AI Growth Letter
       setLoadingStepText("AI 선생님이 마음을 가득 담아 소중한 다정다감 편지를 정성껏 적고 있습니다...");
@@ -172,7 +207,9 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
       } catch (aiErr: any) {
         console.warn("AI letter generation failed but student data is saved:", aiErr);
         // Resolute elegant fallback text so the student always moves forward and doesn't get blocked
-        rawLetter = `${name.trim()}아! 선생님과 AI 분석 서버가 현재 일시 작업 분주 상태여서 다정다감 편지가 잠시 지연되었지만, 네가 스스로를 돌아보며 깊이 적어 준 예쁜 강점(${selectedStrengths.map(s => s.trait).join(', ')})과 발전 다짐은 우리 선생님의 담임교사 나이스 대시보드 기획실에 실시간으로 아주 안전하고 깔끔하게 인계되었단다! \n\n조만간 우리 영리한 선생님께서 네 글을 미소 지으며 보시고 너를 위해 세상에 하나뿐인 멋진 격려와 함께 생활기록부를 더욱 아름답게 가꾸어 주실 거야. 오늘 장단점 돌아보느라 참 수고 많았고 성실하게 잘 참여해 줘서 고마워! 화이팅! 💗`;
+        const strList = selectedStrengths.map(s => s.trait.split(" (")[0]).join(', ');
+        const weakList = selectedWeaknesses.map(w => w.trait.split(" (")[0]).join(', ');
+        rawLetter = `${name.trim()}아! 이번 학기 동안 스스로를 깊이 성찰하는 성장 일지를 멋지게 적어 주었구나!\n\n네가 스스로 꼽은 큰 장점인 [${strList}]은(는) 정말 멋진 보물 같은 매력이란다. 특히 가끔은 [${weakList}]에 아쉬움이 남았다고 솔직하고 용기 있게 털어놓는 모습을 보니, 선생님은 네가 얼마나 더 멋지게 성장하고 싶어 하는 깊이 있는 아이인지 알 수 있어서 참 흐뭇하단다.\n\n네가 일지에 솔직하게 적어준 다짐처럼, 장점은 더 크게 키우고 한 치의 아쉬움도 부드럽게 이겨내는 지혜로운 발걸음을 선생님이 온 마음 다해 격려하고 힘껏 응원해 줄게! 늘 스스로를 예쁘게 가꾸어 나가는 너를 축복한단다. 화이팅! 💗`;
       }
 
       setGeneratedLetter(rawLetter);
@@ -183,6 +220,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
       
       await setDoc(studentDocRef, studentPayload, { merge: true });
 
+      setCurrentActiveStudent(studentPayload); // 상태에 저장하여 Step 5에서 발송 대기 UI가 뜰 수 있도록 함
       setStep(5); // Show letter gift screen!
 
     } catch (e: any) {
@@ -193,10 +231,29 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
     }
   };
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(generatedLetter);
-    setCopySuccess(true);
-    setTimeout(() => setCopySuccess(false), 2000);
+  const copyToClipboard = async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(generatedLetter);
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
+      } else {
+        // Fallback for older browsers and in-app webviews
+        const textArea = document.createElement("textarea");
+        textArea.value = generatedLetter;
+        textArea.style.position = "fixed";
+        textArea.style.opacity = "0";
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textArea);
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
+      }
+    } catch (err) {
+      console.error("Clipboard copy failed: ", err);
+      alert("직접 편지 본문을 꾹 눌러 선택하신 뒤 복사해 주세요!");
+    }
   };
 
   // --- UI: Select/Validate Classroom Code ---
@@ -254,6 +311,74 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
     );
   }
 
+  // --- New Handler: Start or Check Existing Student Record ---
+  const handleStartOrCheck = async () => {
+    if (!name.trim()) {
+      alert("이름을 먼저 입력해 주셔야 시작할 수 있어요!");
+      return;
+    }
+    if (studentPassword.length !== 4) {
+      alert("나만의 간단 비밀번호 숫자 4자리를 정확히 입력해 주세요! (나중에 내 활동 및 편지를 나만 볼 수 있도록 안전하게 지켜줍니다 🔐)");
+      return;
+    }
+    
+    setIsCheckingExisting(true);
+    setErrorMessage(null);
+    try {
+      // Query if this name already exists in classroom students subcollection
+      const q = query(
+        collection(db, 'classrooms', classCode, 'students'),
+        where('name', '==', name.trim())
+      );
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        // Found existing student record!
+        const docData = querySnapshot.docs[0].data() as Student;
+        
+        // Backwards compatibility check: If legacy student didn't set a password, set it now
+        if (!docData.password) {
+          const studentDocRef = doc(db, 'classrooms', classCode, 'students', docData.id);
+          const updatedStudent = { ...docData, password: studentPassword };
+          await setDoc(studentDocRef, { password: studentPassword }, { merge: true });
+          
+          setExistingStudent(updatedStudent);
+          setCurrentActiveStudent(updatedStudent);
+          setShowExistingAlert(true);
+          
+          // Save to local storage for convenience
+          localStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
+        } else if (docData.password !== studentPassword) {
+          // Password mismatch! Protect individual privacy
+          setErrorMessage("⚠️ 비밀번호 오류: 입력한 비밀번호가 등록된 이름의 정보와 일치하지 않습니다. 다른 사람과 이름이 겹친다면 이름 끝에 학년 반(예: 김민수6_3)을 덧붙여 새로 작성하거나, 설정하신 정확한 4자리 숫자를 입력해 주세요. (비밀번호를 모르겠다면 담임 선생님의 화면에서도 손쉽게 조회가 가능합니다)");
+          setExistingStudent(null);
+          setCurrentActiveStudent(null);
+          setShowExistingAlert(false);
+        } else {
+          // Password matched! Allow opening or re-writing
+          setExistingStudent(docData);
+          setCurrentActiveStudent(docData);
+          setShowExistingAlert(true);
+          
+          // Save to local storage for convenience
+          localStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
+        }
+      } else {
+        // No existing record, proceed to step 2 safely as a new student
+        setShowExistingAlert(false);
+        setExistingStudent(null);
+        setCurrentActiveStudent(null);
+        setStep(2);
+      }
+    } catch (err: any) {
+      console.warn("Error checking existing student, proceeding directly:", err);
+      // Fallback: just proceed
+      setStep(2);
+    } finally {
+      setIsCheckingExisting(false);
+    }
+  };
+
   return (
     <div className="max-w-xl mx-auto py-8 px-4 w-full">
       {/* Upper Mode Header */}
@@ -305,33 +430,111 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
             <p className="text-xs text-slate-400 md:px-4 leading-relaxed">
               안녕하세요! <b>[{classRoomName}]</b> 기록방에 참여했습니다.<br />
               나의 좋은 장점과 더 키우고 싶거나 하고 싶은 이야기를 선생님에게 전하면, <br />
-              나를 깊이 격려해 줄 <b>따뜻한 AI 성장 선물 편지</b>가 곧바로 찾아와요!
+              나를 격려해 줄 <b>따뜻한 AI 성장 선물 편지</b>가 찾아옵니다!
             </p>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-600 block">내 성함이나 이름을 기재해 주세요:</label>
-            <input
-              type="text"
-              placeholder="예: 김민수"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full text-sm font-semibold p-3.5 border border-slate-200 bg-slate-50 rounded-xl text-center focus:outline-none focus:border-rose-400 focus:bg-white focus:ring-1 focus:ring-rose-200 transition-all text-slate-800 placeholder:text-slate-300 placeholder:font-normal"
-            />
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-600 block">내 성함이나 이름을 기재해 주세요:</label>
+              <input
+                type="text"
+                placeholder="예: 김민수"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setShowExistingAlert(false);
+                  setExistingStudent(null);
+                }}
+                disabled={isCheckingExisting}
+                className="w-full text-sm font-semibold p-3.5 border border-slate-200 bg-slate-50 rounded-xl text-center focus:outline-none focus:border-rose-400 focus:bg-white focus:ring-1 focus:ring-rose-200 transition-all text-slate-800 placeholder:text-slate-300 placeholder:font-normal disabled:opacity-60"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <label className="text-xs font-bold text-slate-600 block">나만의 4자리 비밀번호 (숫자):</label>
+                {passwordPrefilled && (
+                  <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-0.5 animate-fadeIn">
+                    🔐 기기에 기억됨
+                  </span>
+                )}
+              </div>
+              <input
+                type="password"
+                maxLength={4}
+                pattern="[0-9]*"
+                inputMode="numeric"
+                placeholder="예: 1234 (나중에 내 편지를 조회할 때 열쇠가 됩니다)"
+                value={studentPassword}
+                onChange={(e) => {
+                  setStudentPassword(e.target.value.replace(/[^0-9]/g, ''));
+                }}
+                disabled={isCheckingExisting}
+                className="w-full text-sm font-bold font-mono p-3.5 border border-slate-200 bg-slate-50 rounded-xl text-center focus:outline-none focus:border-rose-400 focus:bg-white focus:ring-1 focus:ring-rose-200 transition-all text-slate-800 tracking-widest disabled:opacity-60"
+              />
+              <p className="text-[10px] text-slate-400 text-left pl-1 leading-normal">
+                💡 <b>숫자 4자리</b>를 지정해 두면, 이 기기에서 내 자가진단 기록과 선생님 조언 편지를 안전하게 혼자서만 확인해볼 수 있습니다.
+              </p>
+            </div>
+
+            {/* Existing Student Alert Indicator */}
+            {showExistingAlert && existingStudent && (
+              <div className="p-4 bg-indigo-50/70 border border-indigo-150 rounded-xl space-y-3 animate-fadeIn text-left">
+                <div className="flex items-center gap-2 text-indigo-900">
+                  <Clock size={15} className="text-indigo-600 animate-pulse shrink-0" />
+                  <p className="text-xs font-extrabold font-sans">
+                    [{existingStudent.name}] 어린이의 제출 이력 발견!
+                  </p>
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed leading-normal">
+                  이미 조사 성찰지를 제출한 이력이 있습니다. 선생님의 가전 발송 편지를 조회하시려면 <b>[📬 선생님 편지함 열기]</b>를, 성찰을 다시 시작하려면 <b>[📝 새로 다시 작성하기]</b>를 클릭하세요.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2 font-semibold pt-1">
+                  <button
+                    onClick={() => {
+                      setGeneratedLetter(existingStudent.feedback || '');
+                      setSelectedStrengths(existingStudent.strengths || []);
+                      setSelectedWeaknesses(existingStudent.weaknesses || []);
+                      setSelfDescription(existingStudent.selfDescription || '');
+                      setCurrentActiveStudent(existingStudent);
+                      setStep(5);
+                    }}
+                    className="flex-1 bg-indigo-650 hover:bg-indigo-700 text-white text-[10px] py-2 px-2.5 rounded-lg text-center cursor-pointer transition-all font-bold shadow-xs flex items-center justify-center gap-1"
+                  >
+                    📬 선생님 편지함 열기
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowExistingAlert(false);
+                      setExistingStudent(null);
+                      setStep(2);
+                    }}
+                    className="flex-1 bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 text-[10px] py-2 px-2.5 rounded-lg text-center cursor-pointer transition-all font-bold flex items-center justify-center gap-1"
+                  >
+                    📝 새로 다시 작성하기
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <button
-            onClick={() => {
-              if (!name.trim()) {
-                alert("이름을 먼저 입력해 주셔야 시작할 수 있어요!");
-                return;
-              }
-              setStep(2);
-            }}
-            className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-3.5 px-4 rounded-xl shadow-xs cursor-pointer flex items-center justify-center gap-2 transition-all"
+            onClick={handleStartOrCheck}
+            disabled={isCheckingExisting}
+            className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white font-bold text-xs py-3.5 px-4 rounded-xl shadow-xs cursor-pointer flex items-center justify-center gap-2 transition-all"
           >
-            시작하기
-            <ArrowRight size={14} />
+            {isCheckingExisting ? (
+              <>
+                <RefreshCw size={14} className="animate-spin" />
+                기록 대조 및 성찰실 입장 중...
+              </>
+            ) : (
+              <>
+                시작하기
+                <ArrowRight size={14} />
+              </>
+            )}
           </button>
         </div>
       )}
@@ -386,12 +589,12 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
             {/* Selected Sliders */}
             {selectedStrengths.length > 0 && (
               <div className="border-t border-slate-100 pt-4 space-y-4">
-                <span className="text-xs font-bold text-slate-705 block">선택한 강점 자부심 레벨 설정:</span>
+                <span className="text-xs font-bold text-slate-700 block">설정 레벨 (높을수록 더욱 어울리는 나의 강점이에요!):</span>
                 {selectedStrengths.map((item) => (
                   <div key={item.trait} className="bg-rose-50/40 border border-rose-100/40 p-3 rounded-xl space-y-1.5">
                     <div className="flex justify-between items-center">
                       <span className="text-xs font-extrabold text-slate-800">{item.trait.split(" (")[0]}</span>
-                      <span className="text-xs font-mono font-black text-rose-500">{item.rating}점 / 10점</span>
+                      <span className="text-xs font-mono font-black text-rose-600">{item.rating}점 / 10점</span>
                     </div>
                     <input
                       type="range"
@@ -399,7 +602,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
                       max="10"
                       value={item.rating}
                       onChange={(e) => handleUpdateRating(item.trait, parseInt(e.target.value), 'strengths')}
-                      className="w-full accent-rose-500 h-1 bg-slate-100 rounded-lg appearance-auto cursor-pointer"
+                      className="w-full accent-rose-600 h-1 bg-slate-100 rounded-lg appearance-auto cursor-pointer"
                     />
                   </div>
                 ))}
@@ -410,45 +613,41 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
           <div className="flex gap-2 pt-2 border-t border-slate-100">
             <button
               onClick={() => setStep(1)}
-              className="w-1/3 border border-slate-200 hover:bg-slate-50 text-slate-650 font-bold text-xs py-3 px-4 rounded-xl cursor-pointer flex items-center justify-center gap-1 transition-all"
+              className="w-1/3 border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs py-3 px-4 rounded-xl cursor-pointer flex items-center justify-center gap-1 transition-all"
             >
               <ArrowLeft size={13} />
               이전으로
             </button>
             <button
               onClick={() => {
-                if (selectedStrengths.length === 0) {
-                  alert("나를 빛낼 최고의 장점을 1개 이상 꼭 선택해 주세요!");
-                  return;
-                }
                 setStep(3);
               }}
               className="w-2/3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-3 px-4 rounded-xl cursor-pointer flex items-center justify-center gap-1.5 shadow-xs transition-all ml-auto"
             >
-              다음 단계: 보완 영역 고르기
+              다음 단계: 나의 아쉬운 점 고르기
               <ArrowRight size={13} />
             </button>
           </div>
         </div>
       )}
 
-      {/* Step 3: Weaknesses (약점 / 보완할 노력) Selection */}
+      {/* Step 3: Weaknesses (아쉬운 점 / 개선할 점) Selection */}
       {step === 3 && (
-        <div className="bg-white border border-slate-150 rounded-2xl p-6 shadow-sm space-y-6">
+        <div className="bg-white border border-slate-150 rounded-2xl p-6 shadow-sm space-y-6 animate-fadeIn">
           <div className="flex justify-between items-center border-b border-slate-100 pb-3">
             <div>
-              <span className="text-[10px] font-extrabold text-rose-500 tracking-wider block uppercase">Step 3 of 4</span>
+              <span className="text-[10px] font-extrabold text-indigo-500 tracking-wider block uppercase">Step 3 of 4</span>
               <h3 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-1">
                 <ShieldAlert size={16} className="text-indigo-500" />
-                내가 더 보완 혹은 날개 펼칠 영역 고르기
+                나의 아쉬웠거나 더 노력하고 싶은 점 고르기
               </h3>
             </div>
-            <span className="text-xs font-mono font-bold text-rose-500 bg-rose-50 px-2.5 py-1 rounded-md">{selectedWeaknesses.length}/3선택</span>
+            <span className="text-xs font-mono font-bold text-indigo-500 bg-indigo-50 px-2.5 py-1 rounded-md">{selectedWeaknesses.length}/3선택</span>
           </div>
 
           <p className="text-xs text-slate-400 leading-relaxed bg-slate-50 p-2.5 rounded-lg">
-            단점이 아닌 <b>"앞으로 노력하여 더 채우고 싶은 분야"</b>를 지정합니다. <br />
-            마찬가지로 아래 목록에서 <b>1개~최대 3개</b>까지 자유롭게 체크해 보세요.
+            이번 학기 동안 조금 아쉬웠거나 혹은 다음 학기에 더 채워가고 싶은 요소를 <b>최대 3개</b> 골라주세요. <br />
+            아래 태그를 선택한 뒤 슬라이더로 자신에게 조절할 수 있습니다 (점수가 작을수록 더 많은 노력이 필요해요).
           </p>
 
           <div className="space-y-4">
@@ -466,7 +665,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
                           onClick={() => handleToggleTrait(pt.name, 'weaknesses')}
                           className={`text-xs py-1.5 px-2.5 rounded-lg border cursor-pointer font-medium transition-all ${
                             isSelected 
-                              ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs font-bold' 
+                              ? 'bg-indigo-500 border-indigo-500 text-white shadow-xs font-bold' 
                               : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
                           }`}
                         >
@@ -542,124 +741,167 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
               </label>
               <span className="text-[10px] text-slate-400 leading-normal block italic bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                 🌱 <b>작성 도움 예시:</b><br />
-                - "학급 행사 때 앞장서서 친구들에게 의견도 많이 내고, 성실히 도우려 노력했습니다."<br />
-                - "수줍음이 조금 많은 편이라 발표할 땐 떨렸지만, 수학 만큼은 정말 책임감 있게 오답도 풀었습니다."
+                - "학급 친구들을 배려하며 다툼 없이 지내려 노력했고, 다음 학기에는 수학 공부와 발표에 조금 더 용기를 내고 싶습니다."
               </span>
             </div>
 
             <textarea
-              placeholder="여기에 자유롭게 작성해 주세요..."
+              rows={4}
+              placeholder="여기에 생각이나 다짐을 자유롭게 적어 보세요. (최소 5자 이상)"
               value={selfDescription}
               onChange={(e) => setSelfDescription(e.target.value)}
-              rows={4}
-              maxLength={200}
-              className="w-full text-xs p-3.5 border border-slate-200 bg-slate-50 rounded-xl leading-relaxed focus:outline-none focus:border-rose-400 focus:bg-white focus:ring-1 focus:ring-rose-200 transition-all text-slate-800 placeholder:text-slate-300"
+              disabled={isSubmitting}
+              className="w-full text-xs p-3.5 border border-slate-200 bg-slate-50 rounded-xl focus:outline-none focus:border-rose-400 focus:bg-white focus:ring-1 focus:ring-rose-200 transition-all text-slate-800 placeholder:text-slate-350 resize-y"
             />
-            <div className="text-right text-[10px] text-slate-400 font-mono">
-              {selfDescription.length} / 200자 제한
-            </div>
           </div>
 
-          {/* Dynamic Loading Overlay during submissions */}
-          {isSubmitting ? (
-            <div className="p-6 bg-rose-50/50 border border-rose-100 rounded-2xl flex flex-col items-center justify-center space-y-3.5 no-print animate-pulse">
-              <RefreshCw size={24} className="text-rose-500 animate-spin" />
-              <div className="text-center space-y-1">
-                <span className="text-xs font-black text-rose-600 block">AI 맞춤 분석 및 편지 가공 중...</span>
-                <p className="text-[10px] text-rose-500 leading-snug font-medium">{loadingStepText}</p>
-              </div>
-            </div>
-          ) : (
-            <div className="flex gap-2 pt-2 border-t border-slate-100">
-              <button
-                onClick={() => setStep(3)}
-                className="w-1/3 border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs py-3 px-4 rounded-xl cursor-pointer flex items-center justify-center gap-1 transition-all"
-              >
-                <ArrowLeft size={13} />
-                이전으로
-              </button>
-              <button
-                onClick={handleSubmitSubmission}
-                className="w-2/3 bg-rose-500 hover:bg-rose-600 text-white font-black text-xs py-3.5 px-4 rounded-xl cursor-pointer flex items-center justify-center gap-2 shadow-sm transition-all text-center"
-              >
-                <Send size={13} />
-                의견 제출 및 따뜻한 조언 받기! 💌
-              </button>
-            </div>
-          )}
+          <div className="flex gap-2 pt-2 border-t border-slate-100">
+            <button
+              onClick={() => setStep(3)}
+              disabled={isSubmitting}
+              className="w-1/3 border border-slate-200 hover:bg-slate-50 text-slate-650 font-bold text-xs py-3 px-4 rounded-xl cursor-pointer flex items-center justify-center gap-1 transition-all"
+            >
+              <ArrowLeft size={13} />
+              이전으로
+            </button>
+            <button
+              onClick={handleSubmitSubmission}
+              disabled={isSubmitting}
+              className="w-2/3 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white font-bold text-xs py-3 px-4 rounded-xl cursor-pointer flex items-center justify-center gap-1.5 shadow-xs transition-all ml-auto"
+            >
+              {isSubmitting ? (
+                <>
+                  <RefreshCw size={13} className="animate-spin" />
+                  제출 및 AI 편지 제작 중...
+                </>
+              ) : (
+                <>
+                  작성 완료 및 제출하기
+                  <ArrowRight size={13} />
+                </>
+              )}
+            </button>
+          </div>
         </div>
       )}
 
       {/* Step 5: Beautiful Gift Letter Opened Panel */}
       {step === 5 && (
         <div className="space-y-6 animate-fadeIn">
-          {/* Virtual Letter Envelope */}
-          <div className="bg-amber-50/20 border-2 border-dashed border-amber-200 rounded-2xl p-6 md:p-8 space-y-6 shadow-xs relative overflow-hidden">
-            <div className="absolute top-2 right-2 flex items-center gap-1 text-[9px] bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-full uppercase border border-amber-100">
-              <Sparkles size={10} className="fill-amber-400 text-amber-500" />
-              Growth Counsel
-            </div>
-
-            <div className="space-y-2 text-center pb-4 border-b border-dashed border-amber-200">
-              <div className="inline-flex p-2.5 bg-rose-50 rounded-full text-rose-500">
-                <Heart size={20} className="fill-rose-400 text-rose-500" />
+          {currentActiveStudent?.isFeedbackSent !== true ? (
+            /* Pending/Waiting Release State Card */
+            <div className="bg-white border border-slate-150 rounded-2xl p-6 md:p-8 shadow-sm space-y-6 text-center animate-fadeIn">
+              <div className="inline-flex p-3.5 bg-indigo-50 rounded-full text-indigo-500 animate-pulse">
+                <Clock size={28} className="text-indigo-600" />
               </div>
-              <h3 className="text-base font-black text-slate-850 tracking-tight">
-                💌 <b>{name}</b> 어린이에게 전하는 AI 조언 편지 선물
-              </h3>
-              <p className="text-[10px] text-amber-600/80 leading-normal">
-                선생님이 참고하여 완성하실 따뜻한 성장의 문장이 도착했어요. 소중히 간직해 보세요!
-              </p>
-            </div>
+               <div className="space-y-2">
+                <h3 className="text-lg font-black text-slate-800 tracking-tight">📝 나를 위한 성장 일지 작성 완료!</h3>
+                <p className="text-xs text-slate-500 leading-relaxed md:px-4 leading-normal">
+                  <b>{name || currentActiveStudent?.name}</b> 어린이의 생각 일기와 장단점 기록은 <br />
+                  담임 선생님의 소중한 생각 기록함으로 아주 안전하게 도착했습니다.
+                </p>
+                <div className="bg-slate-50 border border-slate-150 p-4 rounded-xl text-left mt-4 text-xs text-slate-600 leading-relaxed space-y-2.5">
+                  <p className="font-bold text-slate-700 text-center pb-2 border-b border-slate-200/80 mb-1 flex items-center justify-center gap-1">
+                    <span>💌</span> 다음 과정에 장점 편지가 탄생해요!
+                  </p>
+                  <p>1. <b>AI 다정다감 비서</b>와 <b>담임 선생님</b>이 함께 머리를 맞대어 어린이 마다의 개성과 강점을 축복하는 따뜻한 격려 편지를 소중히 준비하고 계십니다.</p>
+                  <p>2. 선생님께서 너의 성찰을 읽어보시고 <b>'인정(전송)'</b>을 누르시면, 학생은 이곳에 다시 들어와 바로 편지를 선물로 품에 안을 수 있어요!</p>
+                  <p>3. 전송이 완료된 후에는 <b>자기 이름으로 다시 입장</b>하시면, 언제든지 예쁘게 설계된 편지를 저장하고 인쇄해 간직할 수 있습니다.</p>
+                </div>
+              </div>
 
-            {/* Letter Content Display */}
-            <div className="p-5 md:p-6 bg-white border border-amber-100/60 rounded-xl text-slate-700 text-xs md:text-sm leading-relaxed whitespace-pre-wrap font-serif italic shadow-inner relative">
-              <div className="absolute top-4 left-4 text-xs font-serif text-slate-300">"</div>
-              <p className="text-slate-805 font-medium tracking-wide">
-                {generatedLetter}
-              </p>
-              <div className="absolute bottom-4 right-4 text-xs font-serif text-slate-300">"</div>
-            </div>
+              <div className="pt-2">
+                <div className="p-3 bg-indigo-50 border border-indigo-100/50 rounded-xl text-[11px] text-indigo-700 font-bold flex items-center justify-center gap-1.5 shadow-inner">
+                  <span className="inline-block w-2 h-2 rounded-full bg-indigo-500 animate-ping"></span>
+                  <span>선생님이 마음을 실어 전송해 주실 때까지 조금만 설레며 기다려주세요! (발송 대기중 ✉️)</span>
+                </div>
+              </div>
 
-            {/* Actions for the student */}
-            <div className="flex flex-wrap gap-2 pt-2 border-t border-dashed border-amber-200 no-print">
               <button
-                onClick={copyToClipboard}
-                className="flex-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 font-bold text-xs px-3.5 py-3 rounded-xl cursor-pointer flex items-center justify-center gap-1.5 transition-all"
+                onClick={() => {
+                  setName('');
+                  setSelectedStrengths([]);
+                  setSelectedWeaknesses([]);
+                  setSelfDescription('');
+                  setGeneratedLetter('');
+                  setCurrentActiveStudent(null);
+                  setStep(1);
+                }}
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs py-3 rounded-xl transition-all cursor-pointer border border-slate-200"
               >
-                <Copy size={13} />
-                {copySuccess ? '클립보드에 복사 완료!' : '편지 문구 복사하기'}
-              </button>
-              <button
-                onClick={() => window.print()}
-                className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-4 py-3 rounded-xl cursor-pointer flex items-center justify-center gap-1.5 shadow-xs transition-all"
-              >
-                <Printer size={13} />
-                종이 편지로 출력 (Print)
+                대기 화면으로 돌아가기 (처음으로)
               </button>
             </div>
-          </div>
+          ) : (
+            /* Virtual Letter Envelope - Actually Released! */
+            <>
+              <div className="bg-amber-50/20 border-2 border-dashed border-amber-200 rounded-2xl p-6 md:p-8 space-y-6 shadow-xs relative overflow-hidden">
+                <div className="absolute top-2 right-2 flex items-center gap-1 text-[9px] bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-full uppercase border border-amber-100 animate-pulse">
+                  <Sparkles size={10} className="fill-amber-400 text-amber-500" />
+                  Released Growth Letter
+                </div>
 
-          <div className="bg-slate-50 border border-slate-200/60 p-4 rounded-xl text-slate-500 text-[10px] md:text-xs leading-relaxed text-center no-print">
-            💡 <b>소중한 한 줄 생각:</b> 이 배움 의견은 담임 선생님의 교육 데이터베이스에도 <br />
-            실시간으로 기록 되었어요. 선생님께서 생활기록부 행동특성을 더욱 아름답고 <br />
-            사려 깊게 다듬어 주시는 최고의 거름이 되었습니다. 오늘 하루도 수고 많았어요! 💗
-          </div>
+                <div className="space-y-2 text-center pb-4 border-b border-dashed border-amber-200">
+                  <div className="inline-flex p-2.5 bg-rose-50 rounded-full text-rose-500">
+                    <Heart size={20} className="fill-rose-400 text-rose-500 animate-bounce" />
+                  </div>
+                  <h3 className="text-base font-black text-slate-850 tracking-tight">
+                    💌 <b>{name || currentActiveStudent?.name}</b> 어린이에게 전하는 AI 조언 편지 선물
+                  </h3>
+                  <p className="text-[10px] text-amber-600/80 leading-normal">
+                    선생님이 확인하시고 사랑을 듬뿍 담아 발송해 주신 성장 편지에요. 따스히 품어보세요!
+                  </p>
+                </div>
 
-          <button
-            onClick={() => {
-              // Reset values & restart a new entry
-              setName('');
-              setSelectedStrengths([]);
-              setSelectedWeaknesses([]);
-              setSelfDescription('');
-              setGeneratedLetter('');
-              setStep(1);
-            }}
-            className="w-full bg-slate-100 hover:bg-slate-200 text-slate-650 font-bold text-xs py-3 rounded-xl cursor-pointer text-center border border-slate-200/60 block no-print"
-          >
-            대기 화면으로 새로고침 (다른 학생용)
-          </button>
+                {/* Letter Content Display */}
+                <div className="p-5 md:p-6 bg-white border border-amber-100/60 rounded-xl text-slate-700 text-xs md:text-sm leading-relaxed whitespace-pre-wrap font-serif italic shadow-inner relative">
+                  <div className="absolute top-4 left-4 text-xs font-serif text-slate-300">"</div>
+                  <p className="text-slate-855 font-medium tracking-wide">
+                    {generatedLetter || currentActiveStudent?.feedback}
+                  </p>
+                  <div className="absolute bottom-4 right-4 text-xs font-serif text-slate-300">"</div>
+                </div>
+
+                {/* Actions for the student */}
+                <div className="flex flex-wrap gap-2 pt-2 border-t border-dashed border-amber-200 no-print">
+                  <button
+                    onClick={copyToClipboard}
+                    className="flex-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 font-bold text-xs px-3.5 py-3 rounded-xl cursor-pointer flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    <Copy size={13} />
+                    {copySuccess ? '클립보드에 복사 완료!' : '편지 문구 복사하기'}
+                  </button>
+                  <button
+                    onClick={() => window.print()}
+                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-4 py-3 rounded-xl cursor-pointer flex items-center justify-center gap-1.5 shadow-xs transition-all"
+                  >
+                    <Printer size={13} />
+                    종이 편지로 출력 (Print)
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200/60 p-4 rounded-xl text-slate-500 text-[10px] md:text-xs leading-relaxed text-center no-print">
+                💡 <b>스스로 가꾸는 예쁜 마음:</b> 나를 돌아보는 이 소중한 생각들은 나의 한 해 성장 일지에 차곡차곡 모이며,<br />
+                선생님이 너를 더 깊이 이해하고 사랑 가득 담아 다정하게 격려해주는 데 소중한 보배가 된단다. 화이팅! 💗
+              </div>
+
+              <button
+                onClick={() => {
+                  setName('');
+                  setSelectedStrengths([]);
+                  setSelectedWeaknesses([]);
+                  setSelfDescription('');
+                  setGeneratedLetter('');
+                  setCurrentActiveStudent(null);
+                  setStep(1);
+                }}
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs py-3 rounded-xl cursor-pointer text-center border border-slate-200/60 block no-print"
+              >
+                대기 화면으로 새로고침 (다른 학생용)
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

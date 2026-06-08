@@ -1,15 +1,22 @@
 import { useState, useEffect } from 'react';
 import { Student } from '../types';
-import { Copy, Check, FileText, Heart, RefreshCw, PenTool, CheckSquare } from 'lucide-react';
+import { Copy, Check, FileText, Heart, RefreshCw, PenTool, CheckSquare, Send, XCircle } from 'lucide-react';
 
 interface AIPresentationProps {
   student: Student;
   onGenerate: (type: 'evaluation' | 'feedback') => void;
   onUpdateContent: (studentId: string, evaluation: string, feedback: string) => void;
   isGenerating: boolean;
+  onToggleFeedbackSent?: (studentId: string) => void;
 }
 
-export default function AIPresentation({ student, onGenerate, onUpdateContent, isGenerating }: AIPresentationProps) {
+export default function AIPresentation({ 
+  student, 
+  onGenerate, 
+  onUpdateContent, 
+  isGenerating,
+  onToggleFeedbackSent 
+}: AIPresentationProps) {
   const [activeTab, setActiveTab] = useState<'evaluation' | 'feedback'>('evaluation');
   const [copied, setCopied] = useState(false);
   
@@ -126,6 +133,50 @@ export default function AIPresentation({ student, onGenerate, onUpdateContent, i
             )}
           </div>
         </div>
+
+        {/* Feedback Send Release Bar */}
+        {activeTab === 'feedback' && currentText && onToggleFeedbackSent && (
+          <div className={`p-3 md:p-3.5 rounded-xl border flex flex-col sm:flex-row gap-3 justify-between sm:items-center transition-all ${
+            student.isFeedbackSent 
+              ? 'bg-emerald-50/50 border-emerald-200 text-emerald-800' 
+              : 'bg-indigo-50/50 border-indigo-150 text-indigo-900'
+          }`}>
+            <div className="flex items-center gap-2">
+              <span className="flex h-2 w-2 relative">
+                {student.isFeedbackSent && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                )}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${student.isFeedbackSent ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+              </span>
+              <span className="text-xs font-semibold">
+                {student.isFeedbackSent 
+                  ? '📬 학생 실시간 전송 완료 (학생 화면에서 발송됨)' 
+                  : '✉️ 발송 전 대기 중 (선생님의 전송 승인이 필요합니다)'}
+              </span>
+            </div>
+            <button
+              onClick={() => onToggleFeedbackSent(student.id)}
+              disabled={isGenerating}
+              className={`text-xs py-1.5 px-3 rounded-lg font-bold transition-all shrink-0 cursor-pointer flex items-center justify-center gap-1.5 ${
+                student.isFeedbackSent 
+                  ? 'bg-white hover:bg-emerald-100 text-emerald-700 border border-emerald-200' 
+                  : 'bg-indigo-650 hover:bg-indigo-700 text-white shadow-xs'
+              }`}
+            >
+              {student.isFeedbackSent ? (
+                <>
+                  <XCircle size={13} />
+                  발송 회수 (숨김)
+                </>
+              ) : (
+                <>
+                  <Send size={13} />
+                  학생에게 편지 발송하기 💌
+                </>
+              )}
+            </button>
+          </div>
+        )}
 
         {/* Text Area Work Area */}
         <div className="flex-1 flex flex-col min-h-[220px]">

@@ -14,6 +14,8 @@ export interface Student {
   status: 'idle' | 'generating' | 'completed' | 'error';
   errorMsg?: string;
   updatedAt?: string;
+  isFeedbackSent?: boolean; // 교사가 학생에게 편지(피드백)을 발송/공개했는지 여부
+  password?: string;        // 학생이 스스로 설정한 4자리 간단 비밀번호
 }
 
 export interface AIServiceConfig {

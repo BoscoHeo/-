@@ -321,6 +321,7 @@ export default function App() {
     selfDescription?: string;
     strengths?: TraitItem[];
     weaknesses?: TraitItem[];
+    password?: string;
   }) => {
     if (classCode) {
       try {
@@ -1212,8 +1213,13 @@ export default function App() {
                           }`}
                         >
                           <div className="space-y-1 my-0.5">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-bold text-xs text-slate-800">{s.name}</span>
+                              {s.password && (
+                                <span className="text-[9px] text-amber-700 bg-amber-50 px-1 py-0.2 rounded font-mono font-bold flex items-center gap-0.5" title="설정한 4자리 비밀번호 (학생 조회 자물쇠 키)">
+                                  🔐 {s.password}
+                                </span>
+                              )}
                               {s.status === 'generating' && (
                                 <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-sm font-semibold animate-pulse">분석중</span>
                               )}
@@ -1262,16 +1268,31 @@ export default function App() {
                       </div>
 
                       <div className="space-y-3 flex-1">
-                        {/* Name Input */}
-                        <div className="space-y-1">
-                          <label className="text-[11px] font-bold text-slate-700 block">학생 성명</label>
-                          <input
-                            type="text"
-                            value={activeStudent.name || ''}
-                            onChange={(e) => handleUpdateStudentTraits(activeStudent.id, { name: e.target.value })}
-                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-xs font-semibold rounded-xl focus:outline-hidden focus:border-indigo-500 focus:bg-white text-slate-800"
-                            placeholder="성명 명칭"
-                          />
+                        {/* Name & Password Side-by-side */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-slate-700 block">학생 성명</label>
+                            <input
+                              type="text"
+                              value={activeStudent.name || ''}
+                              onChange={(e) => handleUpdateStudentTraits(activeStudent.id, { name: e.target.value })}
+                              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-xs font-semibold rounded-xl focus:outline-hidden focus:border-indigo-500 focus:bg-white text-slate-800"
+                              placeholder="성명 명칭"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-slate-700 block flex items-center gap-1">
+                              <span>🔐 자기 조회 비밀번호</span>
+                            </label>
+                            <input
+                              type="text"
+                              maxLength={4}
+                              value={activeStudent.password || ''}
+                              onChange={(e) => handleUpdateStudentTraits(activeStudent.id, { password: e.target.value.replace(/[^0-9]/g, '') })}
+                              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-xs font-mono font-bold rounded-xl focus:outline-hidden focus:border-indigo-500 focus:bg-white text-amber-800 tracking-wider"
+                              placeholder="임의 숫자 4자리"
+                            />
+                          </div>
                         </div>
 
                         {/* Self Description Box */}
