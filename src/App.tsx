@@ -414,6 +414,32 @@ export default function App() {
     }
   };
 
+  // Toggle release state of AI growth letter to the student
+  const handleToggleFeedbackSent = async (studentId: string) => {
+    if (classCode) {
+      const studentObj = students.find(s => s.id === studentId);
+      if (!studentObj) return;
+      const newSentStatus = !studentObj.isFeedbackSent;
+      try {
+        await setDoc(doc(db, 'classrooms', classCode, 'students', studentId), {
+          isFeedbackSent: newSentStatus
+        }, { merge: true });
+        
+        // Update local list state optimistically
+        setStudents(prev => prev.map(s => s.id === studentId ? { ...s, isFeedbackSent: newSentStatus } : s));
+      } catch (err) {
+        console.error("Error toggling feedback sent status in Firestore:", err);
+      }
+    } else {
+      setStudents(prev => prev.map(s => {
+        if (s.id === studentId) {
+          return { ...s, isFeedbackSent: !s.isFeedbackSent };
+        }
+        return s;
+      }));
+    }
+  };
+
   // Single Generation Request API triggers
   const handleGenerateSingle = async (type: 'evaluation' | 'feedback') => {
     if (!activeStudent) return;
@@ -1444,6 +1470,7 @@ export default function App() {
                       onGenerate={handleGenerateSingle}
                       onUpdateContent={handleUpdateContent}
                       isGenerating={activeStudent.status === 'generating'}
+                      onToggleFeedbackSent={handleToggleFeedbackSent}
                     />
                   ) : (
                     <div className="bg-white border border-slate-100 rounded-2xl p-6 h-full flex flex-col justify-center items-center text-center text-slate-400">

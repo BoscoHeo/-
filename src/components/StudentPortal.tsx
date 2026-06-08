@@ -429,8 +429,9 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
             <h2 className="text-xl font-black text-slate-800 tracking-tight">지혜로운 성장을 돕는 자기조사방</h2>
             <p className="text-xs text-slate-400 md:px-4 leading-relaxed">
               안녕하세요! <b>[{classRoomName}]</b> 기록방에 참여했습니다.<br />
-              나의 좋은 장점과 더 키우고 싶거나 하고 싶은 이야기를 선생님에게 전하면, <br />
-              나를 격려해 줄 <b>따뜻한 AI 성장 선물 편지</b>가 찾아옵니다!
+              나의 소중한 장점과 학기 다짐을 적어 선생님께 전하고, <br />
+              나중에 <b>이름과 나만의 비밀번호 4자리</b>를 치고 다시 들어오면 <br />
+              선생님이 보내주신 <b>따뜻한 다정다감 격려 편지💌</b>를 나 혼자서 안전하게 열어볼 수 있답니다!
             </p>
           </div>
 
