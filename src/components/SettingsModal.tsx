@@ -6,13 +6,16 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   config: AIServiceConfig;
-  onSave: (newConfig: AIServiceConfig) => void;
+  onSave: (newConfig: AIServiceConfig, updatedClassroomPassword?: string) => void;
+  classCode?: string;
+  classroomPassword?: string;
 }
 
-export default function SettingsModal({ isOpen, onClose, config, onSave }: SettingsModalProps) {
+export default function SettingsModal({ isOpen, onClose, config, onSave, classCode, classroomPassword }: SettingsModalProps) {
   const [service, setService] = useState<AIServiceConfig['service']>('built-in');
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('');
+  const [classPassword, setClassPassword] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -21,16 +24,17 @@ export default function SettingsModal({ isOpen, onClose, config, onSave }: Setti
       setService(config.service);
       setApiKey(config.apiKey || '');
       setModel(config.model || '');
+      setClassPassword(classroomPassword || '');
       setSaveSuccess(false);
     }
-  }, [isOpen, config]);
+  }, [isOpen, config, classroomPassword]);
 
   const handleSave = () => {
     onSave({
       service,
       apiKey: service === 'built-in' ? undefined : apiKey,
       model: service === 'built-in' ? undefined : model
-    });
+    }, classCode ? classPassword : undefined);
     setSaveSuccess(true);
     setTimeout(() => {
       setSaveSuccess(false);
@@ -141,6 +145,30 @@ export default function SettingsModal({ isOpen, onClose, config, onSave }: Setti
                 <span>개인 인증 키 정보는 브라우저 내부 로컬스토리지에만 보관하고 작동되어 외부로 안전히 차단 및 암호 보호를 제공합니다.</span>
               </div>
             </>
+          )}
+
+          {/* Classroom Security Password Setting */}
+          {classCode && (
+            <div className="border-t border-slate-100 pt-4 space-y-3">
+              <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <span>🔐</span>
+                학급 생기부 기록실 보안 설정
+              </h4>
+              <p className="text-[10px] text-slate-400 leading-normal">
+                학생들이나 외부 비인가자가 본 전용 학급 대시보드(기록실)에 임의 접근하는 것을 물리적으로 완전 차단합니다. 학급코드인 <b>{classCode}</b>와 함께 아래 설정 비밀번호가 로그인에 요구됩니다.
+              </p>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 block">교사용 관리 비밀번호 지정:</label>
+                <input
+                  type="text"
+                  value={classPassword}
+                  onChange={(e) => setClassPassword(e.target.value)}
+                  placeholder="예: 1234"
+                  maxLength={16}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-100 focus:bg-white focus:border-indigo-500 transition-all text-slate-800 font-mono tracking-widest"
+                />
+              </div>
+            </div>
           )}
         </div>
 

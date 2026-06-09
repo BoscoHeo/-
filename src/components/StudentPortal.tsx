@@ -847,7 +847,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
                     <Heart size={20} className="fill-rose-400 text-rose-500 animate-bounce" />
                   </div>
                   <h3 className="text-base font-black text-slate-850 tracking-tight">
-                    💌 <b>{name || currentActiveStudent?.name}</b> 어린이에게 전하는 AI 조언 편지 선물
+                    💌 <b>{name || currentActiveStudent?.name}</b> 학생에게 전하는 담임 선생님의 따뜻한 마음 편지 선물
                   </h3>
                   <p className="text-[10px] text-amber-600/80 leading-normal">
                     선생님이 확인하시고 사랑을 듬뿍 담아 발송해 주신 성장 편지에요. 따스히 품어보세요!

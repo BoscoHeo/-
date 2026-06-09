@@ -5,7 +5,7 @@ import {
   Plus, Settings, Database, Trash2, Download, RefreshCw, 
   HelpCircle, Sparkles, FileText, Upload, Printer, AlertTriangle, Play,
   Copy, Check, UserCheck, Users, HelpCircle as HelpIcon, ArrowRight, Heart,
-  LogOut, Home
+  LogOut, Home, Lock
 } from 'lucide-react';
 import AIPresentation from './components/AIPresentation';
 import SettingsModal from './components/SettingsModal';
@@ -24,8 +24,11 @@ export default function App() {
   // --- Classroom Management States ---
   const [classCode, setClassCode] = useState<string>(() => localStorage.getItem('teacher_class_code') || '');
   const [className, setClassName] = useState<string>(() => localStorage.getItem('teacher_class_name') || '');
+  const [classPassword, setClassPassword] = useState<string>(() => localStorage.getItem('teacher_class_password') || '');
   const [tempClassName, setTempClassName] = useState('');
   const [tempClassCode, setTempClassCode] = useState('');
+  const [tempCreatePassword, setTempCreatePassword] = useState('');
+  const [tempLoginPassword, setTempLoginPassword] = useState('');
   const [recentClasses, setRecentClasses] = useState<{ code: string; name: string; }[]>(() => {
     try {
       return JSON.parse(localStorage.getItem('teacher_class_history') || '[]');
@@ -98,6 +101,11 @@ export default function App() {
           if (data.apiConfig) {
             setApiConfig(data.apiConfig);
             localStorage.setItem('ai_evaluator_config', JSON.stringify(data.apiConfig));
+          }
+          if (data.password) {
+            setClassPassword(data.password);
+            localStorage.setItem('teacher_class_password', data.password);
+            localStorage.setItem(`teacher_pwd_for_${classCode}`, data.password);
           }
         }
       } catch (err) {
@@ -188,6 +196,10 @@ export default function App() {
       alert("개설하실 학급 명칭을 적어주세요!");
       return;
     }
+    if (!tempCreatePassword.trim()) {
+      alert("교사용 기록방 비밀번호를 꼭 설정해 주세요! (비밀번호를 설정하여 학생들이 다른 선생님이나 본인 학급의 전체 일지 데이터베이스에 비인가 접근하는 것을 완전히 차단합니다 🔐)");
+      return;
+    }
 
     // Generate random 6 characters code
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -201,18 +213,26 @@ export default function App() {
         code,
         name: tempClassName.trim(),
         createdAt: new Date().toISOString(),
-        apiConfig: apiConfig
+        apiConfig: apiConfig,
+        password: tempCreatePassword.trim() // 교사용 관리 비밀번호 저장
       });
 
       setClassCode(code);
       setClassName(tempClassName.trim());
+      setClassPassword(tempCreatePassword.trim());
       localStorage.setItem('teacher_class_code', code);
       localStorage.setItem('teacher_class_name', tempClassName.trim());
+      localStorage.setItem('teacher_class_password', tempCreatePassword.trim());
+      localStorage.setItem(`teacher_pwd_for_${code}`, tempCreatePassword.trim());
 
       // Update history list
       const updatedHistory = [{ code, name: tempClassName.trim() }, ...recentClasses.filter(c => c.code !== code)].slice(0, 10);
       setRecentClasses(updatedHistory);
       localStorage.setItem('teacher_class_history', JSON.stringify(updatedHistory));
+      
+      setTempClassName('');
+      setTempCreatePassword('');
+      setTempLoginPassword('');
 
     } catch (err) {
       console.error("Error creating classroom in Firestore:", err);
@@ -231,10 +251,28 @@ export default function App() {
       const docSnap = await getDoc(doc(db, 'classrooms', enteredCode));
       if (docSnap.exists()) {
         const data = docSnap.data();
+        
+        // 비밀번호 대조
+        const savedPassword = data.password;
+        if (savedPassword) {
+          if (savedPassword !== tempLoginPassword.trim()) {
+            alert("❌ 비밀번호 오류: 기재하신 교사용 관리 비밀번호가 일치하지 않습니다. 해당 학급의 기록방 방장 선생님이 정하신 고유 관리 열쇠를 정확히 입력해 주세요!");
+            return;
+          }
+        }
+        
         const rName = data.name || '우리 학급';
         
         setClassCode(enteredCode);
         setClassName(rName);
+        if (savedPassword) {
+          setClassPassword(savedPassword);
+          localStorage.setItem('teacher_class_password', savedPassword);
+          localStorage.setItem(`teacher_pwd_for_${enteredCode}`, savedPassword);
+        } else {
+          setClassPassword('');
+          localStorage.removeItem('teacher_class_password');
+        }
         localStorage.setItem('teacher_class_code', enteredCode);
         localStorage.setItem('teacher_class_name', rName);
 
@@ -247,12 +285,63 @@ export default function App() {
         const updatedHistory = [{ code: enteredCode, name: rName }, ...recentClasses.filter(c => c.code !== enteredCode)].slice(0, 10);
         setRecentClasses(updatedHistory);
         localStorage.setItem('teacher_class_history', JSON.stringify(updatedHistory));
+        setTempClassCode('');
+        setTempLoginPassword('');
       } else {
         alert("입력하신 고유코드에 해당하는 활성화된 기록실이 없습니다. 명확한 코드를 재확인해 보세요!");
       }
     } catch (err) {
       console.error("Error entering classroom in Firestore:", err);
       alert("학급 입장 중 오류가 발생했습니다.");
+    }
+  };
+
+  const handleEnterRecentClassroom = async (code: string, name: string) => {
+    try {
+      const docSnap = await getDoc(doc(db, 'classrooms', code));
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const savedPassword = data.password;
+        const localPwd = localStorage.getItem(`teacher_pwd_for_${code}`) || '';
+        
+        if (savedPassword && savedPassword !== localPwd) {
+          // If password mismatch, redirect to entry form
+          setTempClassCode(code);
+          setTempLoginPassword('');
+          alert("🔒 이 기록실은 교사용 보안 비밀번호 설정이 적용되어 있습니다. 아래 입장 칸에 해당 기록방의 교사용 비밀번호를 기입하여 로그인해 주세요!");
+          
+          // Scroll or focus class code entry block
+          const optElement = document.getElementById("existing_room_password_input");
+          if (optElement) {
+            optElement.focus();
+          }
+          return;
+        }
+
+        setClassCode(code);
+        setClassName(data.name || name);
+        if (savedPassword) {
+          setClassPassword(savedPassword);
+          localStorage.setItem('teacher_class_password', savedPassword);
+          localStorage.setItem(`teacher_pwd_for_${code}`, savedPassword);
+        } else {
+          setClassPassword('');
+          localStorage.removeItem('teacher_class_password');
+        }
+        localStorage.setItem('teacher_class_code', code);
+        localStorage.setItem('teacher_class_name', data.name || name);
+        
+        if (data.apiConfig) {
+          setApiConfig(data.apiConfig);
+          localStorage.setItem('ai_evaluator_config', JSON.stringify(data.apiConfig));
+        }
+      } else {
+        alert("해당 기록실이 원격 데이터베이스에 존재하지 않습니다.");
+      }
+    } catch (err) {
+      console.error("Recent classroom access error:", err);
+      setTempClassCode(code);
+      alert("원격 서버에서 기록실 보안 정보를 대조하지 못했습니다. 아래 입력창에서 비밀번호를 기재하여 재입장을 추진해 주세요.");
     }
   };
 
@@ -687,18 +776,29 @@ export default function App() {
   };
 
   // Configuration Modal Save
-  const handleSaveConfig = async (newConfig: AIServiceConfig) => {
+  const handleSaveConfig = async (newConfig: AIServiceConfig, updatedClassroomPassword?: string) => {
     setApiConfig(newConfig);
     localStorage.setItem('ai_evaluator_config', JSON.stringify(newConfig));
 
     if (classCode) {
       try {
-        await setDoc(doc(db, 'classrooms', classCode), {
+        const updateData: any = {
           apiConfig: newConfig
-        }, { merge: true });
-        console.log("Successfully persisted apiConfig to Firestore for classroom:", classCode);
+        };
+        if (updatedClassroomPassword !== undefined) {
+          if (!updatedClassroomPassword.trim()) {
+            alert("⚠️ 보안을 위해 교사용 기록방 관리 비밀번호를 비워둘 수 없습니다. 정확한 관리 비밀번호를 기재해 주세요!");
+            return;
+          }
+          updateData.password = updatedClassroomPassword.trim();
+          setClassPassword(updatedClassroomPassword.trim());
+          localStorage.setItem('teacher_class_password', updatedClassroomPassword.trim());
+          localStorage.setItem(`teacher_pwd_for_${classCode}`, updatedClassroomPassword.trim());
+        }
+        await setDoc(doc(db, 'classrooms', classCode), updateData, { merge: true });
+        console.log("Successfully persisted apiConfig & password to Firestore for classroom:", classCode);
       } catch (err) {
-        console.error("Error persisting apiConfig to Firestore:", err);
+        console.error("Error persisting config to Firestore:", err);
       }
     }
   };
@@ -837,18 +937,33 @@ export default function App() {
                     <span className="text-lg">✨</span>
                     새 학급 생기부 기록실 개설
                   </h3>
-                  <p className="text-xs text-slate-500 leading-relaxed">
+                  <p className="text-xs text-slate-550 leading-relaxed">
                     새로운 학년/학급을 위한 클라우드 저장 공간을 최초 분할 개설합니다. (예: 지혜초 5학년 2반)
                   </p>
-                  <div className="space-y-1.5 pt-2">
-                    <label className="text-[10px] text-slate-400 font-bold block">학급 이름 기재:</label>
-                    <input
-                      type="text"
-                      placeholder="예: 서울새빛초 5-2"
-                      value={tempClassName}
-                      onChange={(e) => setTempClassName(e.target.value)}
-                      className="w-full text-xs font-semibold p-3 border border-slate-200 bg-slate-50 rounded-xl focus:outline-none focus:border-indigo-400 focus:bg-white text-slate-800"
-                    />
+                  <div className="space-y-4 pt-1">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-400 font-bold block">학급 이름 기재:</label>
+                      <input
+                        type="text"
+                        placeholder="예: 서울새빛초 5-2"
+                        value={tempClassName}
+                        onChange={(e) => setTempClassName(e.target.value)}
+                        className="w-full text-xs font-semibold p-3 border border-slate-200 bg-slate-50 rounded-xl focus:outline-none focus:border-indigo-400 focus:bg-white text-slate-800"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-400 font-bold block flex items-center gap-1">
+                        <Lock size={10} className="text-slate-400" />
+                        교사용 관리 비밀번호 지정 (추후 로그인 시 필요):
+                      </label>
+                      <input
+                        type="password"
+                        placeholder="예: 1234 (학생들의 무단 대시보드 접근 차단)"
+                        value={tempCreatePassword}
+                        onChange={(e) => setTempCreatePassword(e.target.value)}
+                        className="w-full text-xs font-semibold p-3 border border-slate-200 bg-slate-50 rounded-xl focus:outline-none focus:border-indigo-400 focus:bg-white text-slate-800 font-mono tracking-widest"
+                      />
+                    </div>
                   </div>
                 </div>
                 <button
@@ -871,16 +986,32 @@ export default function App() {
                   <p className="text-xs text-slate-500 leading-relaxed">
                     이미 개설된 6자리 고유 학급 코드가 있다면 코드를 기재하여 즉시 참여할 수 있습니다.
                   </p>
-                  <div className="space-y-1.5 pt-2">
-                    <label className="text-[10px] text-slate-400 font-bold block">6자리 학급코드 기재:</label>
-                    <input
-                      type="text"
-                      placeholder="예: H3F9A1"
-                      maxLength={12}
-                      value={tempClassCode}
-                      onChange={(e) => setTempClassCode(e.target.value.toUpperCase().trim())}
-                      className="w-full text-xs font-bold font-mono tracking-widest p-3 border border-slate-200 bg-slate-50 rounded-xl uppercase text-center focus:outline-none focus:border-slate-400 focus:bg-white text-slate-800 text-center"
-                    />
+                  <div className="space-y-4 pt-1">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-400 font-bold block">6자리 학급코드 기재:</label>
+                      <input
+                        type="text"
+                        placeholder="예: H3F9A1"
+                        maxLength={12}
+                        value={tempClassCode}
+                        onChange={(e) => setTempClassCode(e.target.value.toUpperCase().trim())}
+                        className="w-full text-xs font-bold font-mono tracking-widest p-3 border border-slate-200 bg-slate-50 rounded-xl uppercase text-center focus:outline-none focus:border-slate-400 focus:bg-white text-slate-800 text-center"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-400 font-bold block flex items-center gap-1">
+                        <Lock size={10} className="text-slate-400" />
+                        교사용 관리 비밀번호 입력:
+                      </label>
+                      <input
+                        type="password"
+                        id="existing_room_password_input"
+                        placeholder="설정된 비밀번호 입력 (공란인 예전 기록방은 바로 입장 가능)"
+                        value={tempLoginPassword}
+                        onChange={(e) => setTempLoginPassword(e.target.value)}
+                        className="w-full text-xs font-semibold p-3 border border-slate-200 bg-slate-50 rounded-xl focus:outline-none focus:border-slate-400 focus:bg-white text-slate-800 font-mono tracking-widest"
+                      />
+                    </div>
                   </div>
                 </div>
                 <button
@@ -896,20 +1027,18 @@ export default function App() {
             {/* Local Recently Visited Rooms list history */}
             {recentClasses.length > 0 && (
               <div className="bg-white border border-slate-150 rounded-2xl p-5 space-y-3 shadow-3xs">
-                <span className="text-[10px] font-bold text-slate-400 tracking-wider block">최근 접속한 나의 학급 역사 목록 (클릭 즉시 접속)</span>
+                <span className="text-[10px] font-bold text-slate-400 tracking-wider block">최근 접속한 나의 학급 역사 목록 (원클릭 보안 연동 접속)</span>
                 <div className="grid sm:grid-cols-2 gap-2">
                   {recentClasses.map((item) => (
                     <button
                       key={item.code}
-                      onClick={() => {
-                        setClassCode(item.code);
-                        setClassName(item.name);
-                        localStorage.setItem('teacher_class_code', item.code);
-                        localStorage.setItem('teacher_class_name', item.name);
-                      }}
-                      className="flex justify-between items-center text-left py-2.5 px-3 border border-slate-150 hover:border-indigo-200 rounded-xl text-xs font-semibold text-slate-700 bg-slate-50/50 hover:bg-indigo-50/25 cursor-pointer transition-colors"
+                      onClick={() => handleEnterRecentClassroom(item.code, item.name)}
+                      className="flex justify-between items-center text-left py-2.5 px-3 border border-slate-150 hover:border-indigo-200 rounded-xl text-xs font-semibold text-slate-700 bg-slate-50/50 hover:bg-indigo-50/25 cursor-pointer transition-colors group"
                     >
-                      <span>{item.name}</span>
+                      <span className="flex items-center gap-1">
+                        <span className="text-slate-350 group-hover:text-amber-500 transition-colors">⭐</span>
+                        {item.name}
+                      </span>
                       <span className="font-mono text-[10px] bg-indigo-50 px-2 py-0.5 rounded text-indigo-650 font-black uppercase">{item.code}</span>
                     </button>
                   ))}
@@ -1013,8 +1142,10 @@ export default function App() {
                   if (window.confirm("현재 학급 기록실에서 퇴실하시겠습니까? (저장된 학생 기록 명단은 클라우드에 고스란히 온전히 보존되어 있으며, 학급코드로 언제든지 다시 로그인하실 수 있습니다!)")) {
                     setClassCode('');
                     setClassName('');
+                    setClassPassword('');
                     localStorage.removeItem('teacher_class_code');
                     localStorage.removeItem('teacher_class_name');
+                    localStorage.removeItem('teacher_class_password');
                   }
                 }}
                 className="p-2 text-rose-500 hover:bg-rose-50/50 rounded-xl transition-all border border-rose-200 cursor-pointer flex items-center gap-1.5 text-xs font-bold"
@@ -1494,6 +1625,8 @@ export default function App() {
         onClose={() => setIsSettingsOpen(false)}
         config={apiConfig}
         onSave={handleSaveConfig}
+        classCode={classCode}
+        classroomPassword={classPassword}
       />
 
       {/* Spreadsheet Paste Import Modal */}
