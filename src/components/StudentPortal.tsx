@@ -195,7 +195,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
       }
 
       // 2. Generate customized personal AI Growth Letter
-      setLoadingStepText("AI 선생님이 마음을 가득 담아 소중한 다정다감 편지를 정성껏 적고 있습니다...");
+      setLoadingStepText("담임 선생님이 마음을 가득 담아 소중한 다정다감 편지를 정성껏 적고 있습니다...");
       
       let rawLetter = '';
       try {
@@ -773,7 +773,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
               {isSubmitting ? (
                 <>
                   <RefreshCw size={13} className="animate-spin" />
-                  제출 및 AI 편지 제작 중...
+                  제출 및 마음 편지 제작 중...
                 </>
               ) : (
                 <>
@@ -805,7 +805,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
                   <p className="font-bold text-slate-700 text-center pb-2 border-b border-slate-200/80 mb-1 flex items-center justify-center gap-1">
                     <span>💌</span> 다음 과정에 장점 편지가 탄생해요!
                   </p>
-                  <p>1. <b>AI 다정다감 비서</b>와 <b>담임 선생님</b>이 함께 머리를 맞대어 어린이 마다의 개성과 강점을 축복하는 따뜻한 격려 편지를 소중히 준비하고 계십니다.</p>
+                  <p>1. <b>담임 선생님</b>께서 어린이 마다의 개성과 강점을 축복하는 따뜻한 격려 편지를 소중히 준비하고 계십니다.</p>
                   <p>2. 선생님께서 너의 성찰을 읽어보시고 <b>'인정(전송)'</b>을 누르시면, 학생은 이곳에 다시 들어와 바로 편지를 선물로 품에 안을 수 있어요!</p>
                   <p>3. 전송이 완료된 후에는 <b>자기 이름으로 다시 입장</b>하시면, 언제든지 예쁘게 설계된 편지를 저장하고 인쇄해 간직할 수 있습니다.</p>
                 </div>
