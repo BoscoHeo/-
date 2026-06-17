@@ -18,6 +18,10 @@ export default function SettingsModal({ isOpen, onClose, config, onSave, classCo
   const [classPassword, setClassPassword] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  
+  // Custom letter setting states
+  const [feedbackTone, setFeedbackTone] = useState<AIServiceConfig['feedbackTone']>('gentle');
+  const [feedbackCustomInstruction, setFeedbackCustomInstruction] = useState('');
 
   useEffect(() => {
     if (isOpen) {
@@ -25,6 +29,8 @@ export default function SettingsModal({ isOpen, onClose, config, onSave, classCo
       setApiKey(config.apiKey || '');
       setModel(config.model || '');
       setClassPassword(classroomPassword || '');
+      setFeedbackTone(config.feedbackTone || 'gentle');
+      setFeedbackCustomInstruction(config.feedbackCustomInstruction || '');
       setSaveSuccess(false);
     }
   }, [isOpen, config, classroomPassword]);
@@ -33,7 +39,9 @@ export default function SettingsModal({ isOpen, onClose, config, onSave, classCo
     onSave({
       service,
       apiKey: service === 'built-in' ? undefined : apiKey,
-      model: service === 'built-in' ? undefined : model
+      model: service === 'built-in' ? undefined : model,
+      feedbackTone,
+      feedbackCustomInstruction
     }, classCode ? classPassword : undefined);
     setSaveSuccess(true);
     setTimeout(() => {
@@ -146,6 +154,52 @@ export default function SettingsModal({ isOpen, onClose, config, onSave, classCo
               </div>
             </>
           )}
+
+          {/* Growth Advice Letter Tone & Style Setting */}
+          <div className="border-t border-slate-100 pt-4 space-y-3" id="feedback_tone_settings_section">
+            <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+              <span>💌</span>
+              <span>성장 소통편지 말투 및 스타일 설정</span>
+            </h4>
+            <p className="text-[10px] text-slate-400 leading-normal">
+              학생 상담 및 성찰 조언용 AI 소통편지가 쓰여질 기본 말투 또는 원하시는 샘플 문체의 어조를 직접 정할 수 있습니다.
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-slate-700 block">원하는 편지 어조 선택</label>
+              <select
+                value={feedbackTone}
+                onChange={(e) => setFeedbackTone(e.target.value as AIServiceConfig['feedbackTone'])}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-indigo-100 focus:bg-white focus:border-indigo-500 transition-all text-slate-800 cursor-pointer"
+              >
+                <option value="gentle">🌸 다정다감형 (전통적인 다정한 담임선생님 반말/구어체)</option>
+                <option value="respectful">⭐ 존중정중형 (예의 바르고 배려 섞인 부드러운 존댓말)</option>
+                <option value="humorous">🚀 유머위트형 (친한 베프나 친척 누나/형 같은 친근하고 재치있는 어조)</option>
+                <option value="poetic">🌿 감성서정형 (따뜻한 문학 비유, 명언, 깊은 성찰 힐링 어조)</option>
+                <option value="mentor">💡 멘토지도형 (칭찬에 더해 극복을 위한 미래 비전을 주는 똑부러진 어조)</option>
+                <option value="custom">✏️ 사용자 직접 지정 (아래 입력칸에 원하는 말투/지시 직접 작성)</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-slate-700 block flex items-center justify-between">
+                <span>예시 문구 또는 커스텀 말투 요청</span>
+                {feedbackTone === 'custom' && (
+                  <span className="text-[9px] text-indigo-600 font-extrabold bg-indigo-50 px-1 py-0.5 rounded">필수 입력</span>
+                )}
+              </label>
+              <textarea
+                value={feedbackCustomInstruction}
+                onChange={(e) => setFeedbackCustomInstruction(e.target.value)}
+                rows={3}
+                placeholder={feedbackTone === 'custom' 
+                  ? "예: '~했구나! 소중한 지우야, 선생님은 언제나 너의 가장 친한 친구이자 든든한 등대가 되어줄게.' 처럼 다정하게 반말을 섞어 기재해 줘."
+                  : "선택한 어조 외에 부가적으로 전달할 예시 말투나 특정 요청 양식이 있다면 작성해 주세요. (없으면 공란 가능)"
+                }
+                className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-100 focus:bg-white focus:border-indigo-500 transition-all text-slate-800 leading-normal"
+              />
+            </div>
+          </div>
 
           {/* Classroom Security Password Setting */}
           {classCode && (

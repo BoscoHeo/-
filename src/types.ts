@@ -22,6 +22,8 @@ export interface AIServiceConfig {
   service: 'built-in' | 'custom-gemini' | 'custom-openai';
   apiKey?: string;
   model?: string;
+  feedbackTone?: 'gentle' | 'respectful' | 'humorous' | 'poetic' | 'mentor' | 'custom';
+  feedbackCustomInstruction?: string;
 }
 
 export interface PresetTrait {
