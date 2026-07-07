@@ -562,7 +562,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
           <div className="space-y-4">
             {/* Traits Buttons by Categories */}
             <div className="space-y-3">
-              {['학업/태도', '공동체/인성', '개성/역량'].map((category) => (
+              {['생활', '인성', '학습'].map((category) => (
                 <div key={category} className="space-y-1">
                   <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">{category}</span>
                   <div className="flex flex-wrap gap-1.5">
@@ -654,7 +654,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
           <div className="space-y-4">
             {/* Traits Buttons by Categories */}
             <div className="space-y-3">
-              {['학업/태도', '공동체/인성', '개성/역량'].map((category) => (
+              {['생활', '인성', '학습'].map((category) => (
                 <div key={category} className="space-y-1">
                   <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">{category}</span>
                   <div className="flex flex-wrap gap-1.5">

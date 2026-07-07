@@ -1552,7 +1552,7 @@ export default function App() {
                           <span className="text-[11px] font-bold text-slate-600 block">💡 추천 학급 지표 즉시 추가 bank</span>
                           
                           <div className="max-h-[170px] overflow-y-auto space-y-2.5 pr-1 py-0.5">
-                            {['학업/태도', '공동체/인성', '개성/역량'].map(cat => (
+                            {['생활', '인성', '학습'].map(cat => (
                               <div key={cat} className="space-y-1">
                                 <span className="text-[9px] font-extrabold text-indigo-650 bg-indigo-50/60 px-1.5 py-0.2 rounded font-serif block w-fit">{cat}</span>
                                 <div className="flex flex-wrap gap-1">

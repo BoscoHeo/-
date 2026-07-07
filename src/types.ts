@@ -28,6 +28,6 @@ export interface AIServiceConfig {
 
 export interface PresetTrait {
   name: string;
-  category: '학업/태도' | '공동체/인성' | '개성/역량';
+  category: '생활' | '인성' | '학습';
   description: string;
 }
