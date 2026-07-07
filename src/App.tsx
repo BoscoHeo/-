@@ -1206,6 +1206,31 @@ export default function App() {
               </div>
             </div>
 
+            {/* Dynamic Batch Generation Callout Banner */}
+            {students.length > 0 && students.some(s => !s.evaluation) && (
+              <div className="bg-amber-50/60 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-center gap-3 shadow-3xs animate-fadeIn">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-white rounded-xl shadow-3xs text-amber-500 shrink-0">
+                    <Sparkles size={16} className="text-amber-500 animate-bounce" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-amber-900 tracking-tight">아직 생활기록부 의견서가 생성되지 않은 학생이 존재합니다!</h4>
+                    <p className="text-[10px] text-amber-700 leading-normal mt-0.5">
+                      학생 개별로 한 명씩 생성 버튼을 누를 필요 없이, 하단의 <span className="font-bold">"✨ 전체 AI 일괄 자동생성"</span> 버튼을 클릭하시면 학급 전체 학생들의 의견서와 성장 상담편지가 순차적으로 한 번에 자동 완성됩니다.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleBatchGenerateAll}
+                  disabled={isBatchGenerating}
+                  className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[11px] px-4 py-2.5 rounded-xl shadow-sm hover:shadow-md cursor-pointer transition-all flex items-center gap-1 shrink-0 disabled:opacity-40"
+                >
+                  <Play size={10} fill="white" />
+                  지금 전체 일괄 생성하기
+                </button>
+              </div>
+            )}
+
             {/* Batch / Roster Summary Actions bar */}
             <section className="bg-white border border-slate-100 rounded-2xl p-4 shadow-2xs flex flex-wrap justify-between items-center gap-4">
               
@@ -1245,7 +1270,7 @@ export default function App() {
               </div>
 
               {/* Operations Control buttons */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 md:gap-3">
                 <button
                   onClick={() => setIsExcelImportOpen(true)}
                   className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold text-xs px-3 py-2 rounded-xl cursor-pointer flex items-center gap-1.5 transition-all"
@@ -1257,12 +1282,10 @@ export default function App() {
                 <button
                   onClick={handleBatchGenerateAll}
                   disabled={isBatchGenerating || students.length === 0}
-                  className={`bg-slate-850 hover:bg-slate-900 text-white font-semibold text-xs px-4 py-2 rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5 transition-all ${
-                    isBatchGenerating ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
+                  className={`bg-linear-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-extrabold text-xs px-4.5 py-2.5 rounded-xl shadow-md hover:shadow-lg hover:scale-[1.02] active:scale-95 cursor-pointer flex items-center gap-1.5 transition-all disabled:opacity-40 disabled:pointer-events-none disabled:transform-none disabled:shadow-none`}
                 >
                   <Play size={12} fill="white" />
-                  전체 AI 일괄 자동생성
+                  ✨ 전체 AI 일괄 자동생성
                 </button>
 
                 <button
