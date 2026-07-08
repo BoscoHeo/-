@@ -9,6 +9,31 @@ import {
   Heart, Check, RefreshCw, Copy, Printer, Home, ArrowRight, ArrowLeft, Clock
 } from 'lucide-react';
 
+const safeLocalStorage = {
+  getItem: (key: string): string | null => {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      console.warn("localStorage getItem block protected:", e);
+      return null;
+    }
+  },
+  setItem: (key: string, value: string): void => {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      console.warn("localStorage setItem block protected:", e);
+    }
+  },
+  removeItem: (key: string): void => {
+    try {
+      localStorage.removeItem(key);
+    } catch (e) {
+      console.warn("localStorage removeItem block protected:", e);
+    }
+  }
+};
+
 interface StudentPortalProps {
   apiConfig: AIServiceConfig;
   onBackToHome: () => void;
@@ -59,7 +84,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
   useEffect(() => {
     const trimmed = name.trim();
     if (trimmed && classCode) {
-      const savedPass = localStorage.getItem(`class_auth_${classCode}_${trimmed}`);
+      const savedPass = safeLocalStorage.getItem(`class_auth_${classCode}_${trimmed}`);
       if (savedPass) {
         setStudentPassword(savedPass);
         setPasswordPrefilled(true);
@@ -366,7 +391,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
           setStep(2);
           
           // Save password and name locally to remember this student's ownership
-          localStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
+          safeLocalStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
         } else {
           // Case B: They have actually written/submitted content before.
           if (!docData.password) {
@@ -378,7 +403,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
             setExistingStudent(updatedStudent);
             setCurrentActiveStudent(updatedStudent);
             setShowExistingAlert(true);
-            localStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
+            safeLocalStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
           } else if (docData.password !== studentPassword) {
             // Password mismatch! Protect individual privacy
             setErrorMessage("⚠️ 비밀번호 오류: 입력한 비밀번호가 등록된 이름의 정보와 일치하지 않습니다. 다른 사람과 이름이 겹친다면 이름 끝에 학년 반(예: 김민수6_3)을 덧붙여 새로 작성하거나, 설정하신 정확한 4자리 숫자를 입력해 주세요. (비밀번호를 모르겠다면 담임 선생님의 대시보드 화면에서도 손쉽게 조회가 가능합니다)");
@@ -390,23 +415,31 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
             setExistingStudent(docData);
             setCurrentActiveStudent(docData);
             setShowExistingAlert(true);
-            localStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
+            safeLocalStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
           }
         }
       } else {
         // No existing record, proceed to step 2 safely as a new student
+        const studentId = `student-${Date.now()}`;
         const tempStudent: Student = {
-          id: `student-${Date.now()}`,
+          id: studentId,
           name: name.trim(),
           selfDescription: '',
           strengths: [],
           weaknesses: [],
           evaluation: '',
           feedback: '',
-          status: 'generating',
+          status: 'idle', // 'idle'로 시작하여 작성 중임을 표시
           isFeedbackSent: false,
           password: studentPassword
         };
+
+        // 즉시 Firestore에 저장하여 실시간 대시보드에 학생 이름이 나타나도록 함!
+        const studentDocRef = doc(db, 'classrooms', classCode, 'students', studentId);
+        await setDoc(studentDocRef, tempStudent);
+
+        safeLocalStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
+
         setShowExistingAlert(false);
         setExistingStudent(null);
         setCurrentActiveStudent(tempStudent);
@@ -615,18 +648,18 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
                   <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">{category}</span>
                   <div className="flex flex-wrap gap-1.5">
                     {PRESET_TRAITS.filter(pt => pt.category === category).map((pt) => {
-                      const isSelected = selectedStrengths.some(t => t.trait === pt.name);
+                      const isSelected = selectedStrengths.some(t => t?.trait === pt?.name);
                       return (
                         <button
-                          key={pt.name}
-                          onClick={() => handleToggleTrait(pt.name, 'strengths')}
+                          key={pt?.name || 'trait'}
+                          onClick={() => handleToggleTrait(pt?.name, 'strengths')}
                           className={`text-xs py-1.5 px-2.5 rounded-lg border cursor-pointer font-medium transition-all ${
                             isSelected 
                               ? 'bg-rose-500 border-rose-500 text-white shadow-xs font-bold' 
                               : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
                           }`}
                         >
-                          {pt.name.split(" (")[0]}
+                          {pt?.name?.split(" (")[0] || ""}
                         </button>
                       );
                     })}
@@ -640,17 +673,17 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
               <div className="border-t border-slate-100 pt-4 space-y-4">
                 <span className="text-xs font-bold text-slate-700 block">설정 레벨 (높을수록 더욱 어울리는 나의 강점이에요!):</span>
                 {selectedStrengths.map((item) => (
-                  <div key={item.trait} className="bg-rose-50/40 border border-rose-100/40 p-3 rounded-xl space-y-1.5">
+                  <div key={item?.trait || 'trait'} className="bg-rose-50/40 border border-rose-100/40 p-3 rounded-xl space-y-1.5">
                     <div className="flex justify-between items-center">
-                      <span className="text-xs font-extrabold text-slate-800">{item.trait.split(" (")[0]}</span>
-                      <span className="text-xs font-mono font-black text-rose-600">{item.rating}점 / 10점</span>
+                      <span className="text-xs font-extrabold text-slate-800">{item?.trait?.split(" (")[0] || ""}</span>
+                      <span className="text-xs font-mono font-black text-rose-600">{item?.rating}점 / 10점</span>
                     </div>
                     <input
                       type="range"
                       min="1"
                       max="10"
-                      value={item.rating}
-                      onChange={(e) => handleUpdateRating(item.trait, parseInt(e.target.value), 'strengths')}
+                      value={item?.rating || 9}
+                      onChange={(e) => handleUpdateRating(item?.trait, parseInt(e.target.value), 'strengths')}
                       className="w-full accent-rose-600 h-1 bg-slate-100 rounded-lg appearance-auto cursor-pointer"
                     />
                   </div>
@@ -668,7 +701,20 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
               이전으로
             </button>
             <button
-              onClick={() => {
+              onClick={async () => {
+                // 실시간 수집 및 데이터 무결성을 위해 다음 버튼 클릭 시 현재까지 작성된 장점을 Firestore에 자동 업로드
+                try {
+                  const sId = currentActiveStudent?.id;
+                  if (sId && classCode) {
+                    const studentDocRef = doc(db, 'classrooms', classCode, 'students', sId);
+                    await setDoc(studentDocRef, {
+                      strengths: selectedStrengths
+                    }, { merge: true });
+                    setCurrentActiveStudent(prev => prev ? { ...prev, strengths: selectedStrengths } : null);
+                  }
+                } catch (err) {
+                  console.warn("Auto save strengths failed:", err);
+                }
                 setStep(3);
               }}
               className="w-2/3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-3 px-4 rounded-xl cursor-pointer flex items-center justify-center gap-1.5 shadow-xs transition-all ml-auto"
@@ -707,18 +753,18 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
                   <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">{category}</span>
                   <div className="flex flex-wrap gap-1.5">
                     {PRESET_TRAITS.filter(pt => pt.category === category).map((pt) => {
-                      const isSelected = selectedWeaknesses.some(t => t.trait === pt.name);
+                      const isSelected = selectedWeaknesses.some(t => t?.trait === pt?.name);
                       return (
                         <button
-                          key={pt.name}
-                          onClick={() => handleToggleTrait(pt.name, 'weaknesses')}
+                          key={pt?.name || 'trait'}
+                          onClick={() => handleToggleTrait(pt?.name, 'weaknesses')}
                           className={`text-xs py-1.5 px-2.5 rounded-lg border cursor-pointer font-medium transition-all ${
                             isSelected 
                               ? 'bg-indigo-500 border-indigo-500 text-white shadow-xs font-bold' 
                               : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
                           }`}
                         >
-                          {pt.name.split(" (")[0]}
+                          {pt?.name?.split(" (")[0] || ""}
                         </button>
                       );
                     })}
@@ -732,17 +778,17 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
               <div className="border-t border-slate-100 pt-4 space-y-4">
                 <span className="text-xs font-bold text-slate-700 block">설정 레벨 (낮을수록 더욱 극복 노력이 필요해요!):</span>
                 {selectedWeaknesses.map((item) => (
-                  <div key={item.trait} className="bg-indigo-50/40 border border-indigo-100/40 p-3 rounded-xl space-y-1.5">
+                  <div key={item?.trait || 'trait'} className="bg-indigo-50/40 border border-indigo-100/40 p-3 rounded-xl space-y-1.5">
                     <div className="flex justify-between items-center">
-                      <span className="text-xs font-extrabold text-slate-800">{item.trait.split(" (")[0]}</span>
-                      <span className="text-xs font-mono font-black text-indigo-600">{item.rating}점 / 10점</span>
+                      <span className="text-xs font-extrabold text-slate-800">{item?.trait?.split(" (")[0] || ""}</span>
+                      <span className="text-xs font-mono font-black text-indigo-600">{item?.rating}점 / 10점</span>
                     </div>
                     <input
                       type="range"
                       min="1"
                       max="10"
-                      value={item.rating}
-                      onChange={(e) => handleUpdateRating(item.trait, parseInt(e.target.value), 'weaknesses')}
+                      value={item?.rating || 5}
+                      onChange={(e) => handleUpdateRating(item?.trait, parseInt(e.target.value), 'weaknesses')}
                       className="w-full accent-indigo-600 h-1 bg-slate-100 rounded-lg appearance-auto cursor-pointer"
                     />
                   </div>
@@ -760,7 +806,20 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
               이전으로
             </button>
             <button
-              onClick={() => {
+              onClick={async () => {
+                // 실시간 수집 및 데이터 무결성을 위해 다음 버튼 클릭 시 현재까지 작성된 아쉬운 점을 Firestore에 자동 업로드
+                try {
+                  const sId = currentActiveStudent?.id;
+                  if (sId && classCode) {
+                    const studentDocRef = doc(db, 'classrooms', classCode, 'students', sId);
+                    await setDoc(studentDocRef, {
+                      weaknesses: selectedWeaknesses
+                    }, { merge: true });
+                    setCurrentActiveStudent(prev => prev ? { ...prev, weaknesses: selectedWeaknesses } : null);
+                  }
+                } catch (err) {
+                  console.warn("Auto save weaknesses failed:", err);
+                }
                 setStep(4);
               }}
               className="w-2/3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-3 px-4 rounded-xl cursor-pointer flex items-center justify-center gap-1.5 shadow-xs transition-all ml-auto"

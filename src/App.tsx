@@ -437,7 +437,7 @@ export default function App() {
     const studentObj = students.find(s => s.id === studentId);
     if (!studentObj) return;
 
-    const traitList = type === 'strengths' ? [...studentObj.strengths] : [...studentObj.weaknesses];
+    const traitList = type === 'strengths' ? [...(studentObj.strengths || [])] : [...(studentObj.weaknesses || [])];
     
     // Prevent duplicate traits
     if (traitList.some(item => item.trait === traitName)) return;
@@ -457,7 +457,7 @@ export default function App() {
     const studentObj = students.find(s => s.id === studentId);
     if (!studentObj) return;
 
-    const filtered = (type === 'strengths' ? studentObj.strengths : studentObj.weaknesses)
+    const filtered = (type === 'strengths' ? (studentObj.strengths || []) : (studentObj.weaknesses || []))
       .filter(item => item.trait !== traitName);
 
     handleUpdateStudentTraits(studentId, {
@@ -470,7 +470,7 @@ export default function App() {
     const studentObj = students.find(s => s.id === studentId);
     if (!studentObj) return;
 
-    const updatedList = (type === 'strengths' ? studentObj.strengths : studentObj.weaknesses).map(item => {
+    const updatedList = (type === 'strengths' ? (studentObj.strengths || []) : (studentObj.weaknesses || [])).map(item => {
       if (item.trait === traitName) {
         return { ...item, rating: score };
       }
@@ -730,8 +730,8 @@ export default function App() {
 
     students.forEach(student => {
       const escape = (text: string) => `"${(text || '').replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
-      const strengthsStr = student.strengths.map(s => `${s.trait}(${s.rating}점)`).join('; ');
-      const weaknessesStr = student.weaknesses.map(w => `${w.trait}(${w.rating}점)`).join('; ');
+      const strengthsStr = (student.strengths || []).map(s => `${s.trait}(${s.rating}점)`).join('; ');
+      const weaknessesStr = (student.weaknesses || []).map(w => `${w.trait}(${w.rating}점)`).join('; ');
 
       csvContent += `${escape(student.name)},${escape(student.selfDescription)},${escape(strengthsStr)},${escape(weaknessesStr)},${escape(student.evaluation)},${escape(student.feedback)}\n`;
     });
@@ -1096,11 +1096,11 @@ export default function App() {
                 <div className="grid grid-cols-3 gap-4 text-xs text-slate-600">
                   <div className="bg-slate-50 p-2 rounded-md">
                     <span className="font-bold block mb-1">핵심 장점(강점)</span>
-                    {student.strengths.map(s => `${s.trait}(${s.rating}점)`).join(', ') || '없음'}
+                    {(student.strengths || []).map(s => `${s.trait}(${s.rating}점)`).join(', ') || '없음'}
                   </div>
                   <div className="bg-slate-50 p-2 rounded-md">
                     <span className="font-bold block mb-1">보완 영역(약점)</span>
-                    {student.weaknesses.map(w => `${w.trait}(${w.rating}점)`).join(', ') || '없음'}
+                    {(student.weaknesses || []).map(w => `${w.trait}(${w.rating}점)`).join(', ') || '없음'}
                   </div>
                   <div className="bg-slate-50 p-2 rounded-md">
                     <span className="font-bold block mb-1">자기평가 내용</span>
@@ -1431,7 +1431,7 @@ export default function App() {
 
                           <div className="flex items-center gap-1.5 shrink-0">
                             <span className="text-[10px] text-slate-400 font-mono bg-slate-100 px-1.5 py-0.5 rounded font-bold">
-                              {s.strengths.length + s.weaknesses.length}개 지표
+                              {((s.strengths || []).length + (s.weaknesses || []).length)}개 지표
                             </span>
                             <button
                               onClick={(e) => handleDeleteStudent(s.id, e)}
@@ -1512,10 +1512,10 @@ export default function App() {
 
                           <div className="space-y-2">
                             {/* Active Strengths Traits List */}
-                            {activeStudent.strengths.length === 0 ? (
+                            {(activeStudent.strengths || []).length === 0 ? (
                               <p className="text-[11px] text-slate-400 italic">아래 추천 인물 지표에서 강점 설정을 채우세요.</p>
                             ) : (
-                              activeStudent.strengths.map(item => (
+                              (activeStudent.strengths || []).map(item => (
                                 <div key={item.trait} className="flex items-center justify-between text-xs bg-emerald-50/35 border border-emerald-100 p-2 rounded-lg">
                                   <div className="flex items-center gap-1.5 w-1/3">
                                     <span className="font-bold text-emerald-900 truncate">{item.trait}</span>
@@ -1552,10 +1552,10 @@ export default function App() {
 
                           <div className="space-y-2">
                             {/* Active Weaknesses Traits List */}
-                            {activeStudent.weaknesses.length === 0 ? (
+                            {(activeStudent.weaknesses || []).length === 0 ? (
                               <p className="text-[11px] text-slate-400 italic">아래 추천 지표에서 약점 영역을 설정하세요.</p>
                             ) : (
-                              activeStudent.weaknesses.map(item => (
+                              (activeStudent.weaknesses || []).map(item => (
                                 <div key={item.trait} className="flex items-center justify-between text-xs bg-rose-50/20 border border-rose-100 p-2 rounded-lg">
                                   <div className="flex items-center gap-1.5 w-1/3">
                                     <span className="font-bold text-rose-900 truncate">{item.trait}</span>
