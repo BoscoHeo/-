@@ -336,32 +336,62 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
         // Found existing student record!
         const docData = querySnapshot.docs[0].data() as Student;
         
-        // Backwards compatibility check: If legacy student didn't set a password, set it now
-        if (!docData.password) {
-          const studentDocRef = doc(db, 'classrooms', classCode, 'students', docData.id);
-          const updatedStudent = { ...docData, password: studentPassword };
-          await setDoc(studentDocRef, { password: studentPassword }, { merge: true });
-          
-          setExistingStudent(updatedStudent);
-          setCurrentActiveStudent(updatedStudent);
-          setShowExistingAlert(true);
-          
-          // Save to local storage for convenience
-          localStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
-        } else if (docData.password !== studentPassword) {
-          // Password mismatch! Protect individual privacy
-          setErrorMessage("⚠️ 비밀번호 오류: 입력한 비밀번호가 등록된 이름의 정보와 일치하지 않습니다. 다른 사람과 이름이 겹친다면 이름 끝에 학년 반(예: 김민수6_3)을 덧붙여 새로 작성하거나, 설정하신 정확한 4자리 숫자를 입력해 주세요. (비밀번호를 모르겠다면 담임 선생님의 화면에서도 손쉽게 조회가 가능합니다)");
-          setExistingStudent(null);
-          setCurrentActiveStudent(null);
-          setShowExistingAlert(false);
-        } else {
-          // Password matched! Allow opening or re-writing
-          setExistingStudent(docData);
+        // Determine if they have actually written/submitted anything (strengths or selfDescription filled)
+        const hasSubmittedContent = 
+          (docData.strengths && docData.strengths.length > 0) || 
+          (docData.weaknesses && docData.weaknesses.length > 0) || 
+          (docData.selfDescription && docData.selfDescription.trim().length > 0);
+
+        if (!hasSubmittedContent) {
+          // Case A: Pre-registered student by teacher or completely empty draft (first login)
+          // Secure with the entered password if they didn't have one set yet
+          if (!docData.password) {
+            const studentDocRef = doc(db, 'classrooms', classCode, 'students', docData.id);
+            await setDoc(studentDocRef, { password: studentPassword }, { merge: true });
+            docData.password = studentPassword;
+          } else if (docData.password !== studentPassword) {
+            // If they did have a password set somehow, enforce it
+            setErrorMessage("⚠️ 비밀번호 오류: 입력한 비밀번호가 등록된 이름의 정보와 일치하지 않습니다. 설정하신 정확한 4자리 숫자를 입력해 주세요. (비밀번호를 모르겠다면 담임 선생님의 대시보드 화면에서도 손쉽게 조회가 가능합니다)");
+            setIsCheckingExisting(false);
+            return;
+          }
+
+          // Directly go to Step 2 without showing any confusing "already exists" alerts!
           setCurrentActiveStudent(docData);
-          setShowExistingAlert(true);
+          setExistingStudent(docData);
+          setSelectedStrengths([]);
+          setSelectedWeaknesses([]);
+          setSelfDescription('');
+          setShowExistingAlert(false);
+          setStep(2);
           
-          // Save to local storage for convenience
+          // Save password and name locally to remember this student's ownership
           localStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
+        } else {
+          // Case B: They have actually written/submitted content before.
+          if (!docData.password) {
+            // Legacy student without password - set it now and show options
+            const studentDocRef = doc(db, 'classrooms', classCode, 'students', docData.id);
+            const updatedStudent = { ...docData, password: studentPassword };
+            await setDoc(studentDocRef, { password: studentPassword }, { merge: true });
+            
+            setExistingStudent(updatedStudent);
+            setCurrentActiveStudent(updatedStudent);
+            setShowExistingAlert(true);
+            localStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
+          } else if (docData.password !== studentPassword) {
+            // Password mismatch! Protect individual privacy
+            setErrorMessage("⚠️ 비밀번호 오류: 입력한 비밀번호가 등록된 이름의 정보와 일치하지 않습니다. 다른 사람과 이름이 겹친다면 이름 끝에 학년 반(예: 김민수6_3)을 덧붙여 새로 작성하거나, 설정하신 정확한 4자리 숫자를 입력해 주세요. (비밀번호를 모르겠다면 담임 선생님의 대시보드 화면에서도 손쉽게 조회가 가능합니다)");
+            setExistingStudent(null);
+            setCurrentActiveStudent(null);
+            setShowExistingAlert(false);
+          } else {
+            // Password matched! Allow opening or editing
+            setExistingStudent(docData);
+            setCurrentActiveStudent(docData);
+            setShowExistingAlert(true);
+            localStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
+          }
         }
       } else {
         // No existing record, proceed to step 2 safely as a new student
@@ -485,11 +515,11 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
                 <div className="flex items-center gap-2 text-indigo-900">
                   <Clock size={15} className="text-indigo-600 animate-pulse shrink-0" />
                   <p className="text-xs font-extrabold font-sans">
-                    [{existingStudent.name}] 어린이의 제출 이력 발견!
+                    [{existingStudent.name}] 어린이의 작성 기록이 있습니다!
                   </p>
                 </div>
                 <p className="text-[11px] text-slate-600 leading-relaxed leading-normal">
-                  이미 조사 성찰지를 제출한 이력이 있습니다. 선생님의 가전 발송 편지를 조회하시려면 <b>[📬 선생님 편지함 열기]</b>를, 성찰을 다시 시작하려면 <b>[📝 새로 다시 작성하기]</b>를 클릭하세요.
+                  이미 조사 성찰지를 제출한 이력이 존재합니다. 선생님께서 발송해 주신 사랑의 격려 편지를 확인하시려면 <b>[📬 선생님 편지함 열기]</b>를, 이전에 썼던 내용을 확인·수정하거나 다시 작성하시려면 <b>[📝 작성 내용 수정 / 이어서 쓰기]</b>를 클릭하세요.
                 </p>
                 <div className="flex flex-col sm:flex-row gap-2 font-semibold pt-1">
                   <button
@@ -507,13 +537,16 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
                   </button>
                   <button
                     onClick={() => {
+                      setSelectedStrengths(existingStudent.strengths || []);
+                      setSelectedWeaknesses(existingStudent.weaknesses || []);
+                      setSelfDescription(existingStudent.selfDescription || '');
+                      setCurrentActiveStudent(existingStudent);
                       setShowExistingAlert(false);
-                      setExistingStudent(null);
                       setStep(2);
                     }}
                     className="flex-1 bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 text-[10px] py-2 px-2.5 rounded-lg text-center cursor-pointer transition-all font-bold flex items-center justify-center gap-1"
                   >
-                    📝 새로 다시 작성하기
+                    📝 작성 내용 수정 / 이어서 쓰기
                   </button>
                 </div>
               </div>

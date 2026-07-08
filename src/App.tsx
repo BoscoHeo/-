@@ -46,6 +46,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isExcelImportOpen, setIsExcelImportOpen] = useState(false);
   const [isBatchGenerating, setIsBatchGenerating] = useState(false);
+  const [showBatchOptionModal, setShowBatchOptionModal] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [isPrintPreview, setIsPrintPreview] = useState(false);
   const [showCopyUrlTip, setShowCopyUrlTip] = useState(false);
@@ -590,21 +591,34 @@ export default function App() {
   };
 
   // Bulk / Batch Generate for all students (Sequential sleep to prevent API 429 limits)
-  const handleBatchGenerateAll = async () => {
-    if (students.length === 0) return;
+  const handleBatchGenerateAll = () => {
+    if (students.length === 0) {
+      alert("생성할 학생이 없습니다. 학생을 먼저 추가하거나 엑셀 가져오기, 또는 샘플 데이터 복원을 진행해 주세요.");
+      return;
+    }
+    setShowBatchOptionModal(true);
+  };
+
+  const startBatchGeneration = async (mode: 'missing-only' | 'overwrite-all') => {
+    setShowBatchOptionModal(false);
     
-    const confirmRun = window.confirm(
-      `학급 전체 학생 ${students.length}명에 대하여 생활기록부 평가문 및 상담조언을 순차 일괄생성하시겠습니까?\n(AI 처리 환경에 따라 약 수십초~수 분이 소요될 수 있습니다.)`
-    );
-    if (!confirmRun) return;
+    // Filter the students based on selected mode
+    const targets = mode === 'missing-only' 
+      ? students.filter(s => !s.evaluation || !s.feedback) 
+      : students;
+
+    if (targets.length === 0) {
+      alert("생성 대상 학생이 없습니다. (이미 모든 학생의 내용이 생성 완료되었습니다.)");
+      return;
+    }
 
     setIsBatchGenerating(true);
-    setBatchProgress({ current: 0, total: students.length });
+    setBatchProgress({ current: 0, total: targets.length });
 
-    // Iterate through students
-    for (let i = 0; i < students.length; i++) {
-      const target = students[i];
-      setBatchProgress({ current: i + 1, total: students.length });
+    // Iterate through target students
+    for (let i = 0; i < targets.length; i++) {
+      const target = targets[i];
+      setBatchProgress({ current: i + 1, total: targets.length });
 
       // Update student status to generating
       if (classCode) {
@@ -1658,6 +1672,106 @@ export default function App() {
         onClose={() => setIsExcelImportOpen(false)}
         onImport={handleImportStudents}
       />
+
+      {/* Batch Generation Options Modal */}
+      {showBatchOptionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn text-slate-800" id="batch-option-modal">
+          <div className="bg-white rounded-3xl border border-slate-150 shadow-2xl max-w-lg w-full overflow-hidden transform transition-all animate-scaleUp">
+            
+            {/* Header */}
+            <div className="p-6 pb-4 border-b border-slate-100 flex items-start gap-4">
+              <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-600 shrink-0">
+                <Sparkles size={24} className="animate-pulse" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-black text-slate-800 tracking-tight">🤖 AI 일괄 생성 방식 선택</h3>
+                <p className="text-xs text-slate-500 leading-normal">
+                  학급 전체 학생의 행동발달 평가문과 성장 편지를 한 번에 자동 생성합니다. 아래에서 생성 방식을 선택해 주세요.
+                </p>
+              </div>
+            </div>
+
+            {/* Content / Stats */}
+            <div className="p-6 space-y-5">
+              
+              {/* Stat Boxes */}
+              <div className="grid grid-cols-3 gap-2.5 text-center">
+                <div className="bg-slate-50 border border-slate-150 rounded-2xl p-2.5">
+                  <span className="text-[10px] text-slate-400 font-bold block">전체 학급인원</span>
+                  <span className="text-base font-black text-slate-700">{students.length}명</span>
+                </div>
+                <div className="bg-amber-50/60 border border-amber-150 rounded-2xl p-2.5">
+                  <span className="text-[10px] text-amber-600 font-bold block">미생성 학생</span>
+                  <span className="text-base font-black text-amber-700">{students.filter(s => !s.evaluation || !s.feedback).length}명</span>
+                </div>
+                <div className="bg-emerald-50/60 border border-emerald-150 rounded-2xl p-2.5">
+                  <span className="text-[10px] text-emerald-600 font-bold block">생성 완료 학생</span>
+                  <span className="text-base font-black text-emerald-700">{students.filter(s => s.evaluation && s.feedback).length}명</span>
+                </div>
+              </div>
+
+              {/* Selection cards */}
+              <div className="space-y-3">
+                
+                {/* Card A: Missing Only */}
+                <button
+                  onClick={() => startBatchGeneration('missing-only')}
+                  className="w-full text-left bg-emerald-50/20 hover:bg-emerald-50/60 border border-emerald-200 hover:border-emerald-300 rounded-2xl p-4 cursor-pointer transition-all flex items-start gap-3.5 group"
+                >
+                  <div className="mt-1 shrink-0 p-2 bg-emerald-500 text-white rounded-xl shadow-xs group-hover:scale-105 transition-transform">
+                    <Play size={14} fill="white" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-emerald-950">1. 미생성 학생만 순차 생성</span>
+                      <span className="text-[9px] font-extrabold bg-emerald-500 text-white px-1.5 py-0.5 rounded-full">추천</span>
+                    </div>
+                    <p className="text-[11px] text-emerald-800 leading-normal">
+                      기존에 작성 완료된 학생 기록(선생님이 수정한 내용 포함)은 <b>안전하게 보존</b>하고, 아직 AI 평가문이 없는 학생(<span className="font-bold">{students.filter(s => !s.evaluation || !s.feedback).length}명</span>)만 선택적으로 생성합니다.
+                    </p>
+                  </div>
+                </button>
+
+                {/* Card B: Overwrite All */}
+                <button
+                  onClick={() => {
+                    const confirmDouble = window.confirm(
+                      "🚨 경고: 이 작업을 수행하면 기존에 생성되었거나 선생님께서 정성껏 수정하신 내용들이 완전히 삭제되고 AI 기본 글귀로 새로 덮어씌워집니다.\n\n정말로 전체 초기화 후 재생성하시겠습니까?"
+                    );
+                    if (confirmDouble) {
+                      startBatchGeneration('overwrite-all');
+                    }
+                  }}
+                  className="w-full text-left bg-rose-50/10 hover:bg-rose-50/40 border border-rose-100 hover:border-rose-200 rounded-2xl p-4 cursor-pointer transition-all flex items-start gap-3.5 group"
+                >
+                  <div className="mt-1 shrink-0 p-2 bg-rose-500 text-white rounded-xl shadow-xs group-hover:scale-105 transition-transform">
+                    <AlertTriangle size={14} />
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-xs font-black text-rose-950 block">2. 이미 생성된 학생도 모두 재생성</span>
+                    <p className="text-[11px] text-rose-800 leading-normal">
+                      기존 작성 이력을 모두 지우고, 학급 전체 학생(<span className="font-bold">{students.length}명</span>)을 대상으로 처음부터 새롭게 AI 문장 생성을 처리합니다.
+                    </p>
+                  </div>
+                </button>
+
+              </div>
+
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setShowBatchOptionModal(false)}
+                className="bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 font-bold text-xs px-4 py-2 rounded-xl cursor-pointer transition-colors"
+              >
+                닫기 / 취소
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );
