@@ -395,9 +395,24 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
         }
       } else {
         // No existing record, proceed to step 2 safely as a new student
+        const tempStudent: Student = {
+          id: `student-${Date.now()}`,
+          name: name.trim(),
+          selfDescription: '',
+          strengths: [],
+          weaknesses: [],
+          evaluation: '',
+          feedback: '',
+          status: 'generating',
+          isFeedbackSent: false,
+          password: studentPassword
+        };
         setShowExistingAlert(false);
         setExistingStudent(null);
-        setCurrentActiveStudent(null);
+        setCurrentActiveStudent(tempStudent);
+        setSelectedStrengths([]);
+        setSelectedWeaknesses([]);
+        setSelfDescription('');
         setStep(2);
       }
     } catch (err: any) {
