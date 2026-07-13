@@ -34,6 +34,23 @@ const safeLocalStorage = {
   }
 };
 
+const isSelfDescriptionEmpty = (desc: string | undefined | null) => {
+  if (!desc) return true;
+  const trimmed = desc.trim();
+  if (trimmed === '') return true;
+  const emptyMarkers = [
+    '비어있습니다',
+    '비어 있습니다',
+    '아직 완료되지',
+    '입력되지',
+    '기록이 없습니다',
+    '의견이 없습니다',
+    '비어있음',
+    '비어 있음'
+  ];
+  return emptyMarkers.some(marker => trimmed.includes(marker));
+};
+
 interface StudentPortalProps {
   apiConfig: AIServiceConfig;
   onBackToHome: () => void;
@@ -214,7 +231,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
 
       // Save password and name locally to remember this student's ownership
       try {
-        localStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
+        safeLocalStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
       } catch (locErr) {
         console.warn("LocalStorage caching failed:", locErr);
       }
@@ -362,10 +379,11 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
         const docData = querySnapshot.docs[0].data() as Student;
         
         // Determine if they have actually written/submitted anything (strengths or selfDescription filled)
-        const hasSubmittedContent = 
-          (docData.strengths && docData.strengths.length > 0) || 
-          (docData.weaknesses && docData.weaknesses.length > 0) || 
-          (docData.selfDescription && docData.selfDescription.trim().length > 0);
+        const hasStrengths = Array.isArray(docData.strengths) && docData.strengths.length > 0;
+        const hasWeaknesses = Array.isArray(docData.weaknesses) && docData.weaknesses.length > 0;
+        const hasSelfDesc = !isSelfDescriptionEmpty(docData.selfDescription);
+        
+        const hasSubmittedContent = hasStrengths || hasWeaknesses || hasSelfDesc;
 
         if (!hasSubmittedContent) {
           // Case A: Pre-registered student by teacher or completely empty draft (first login)
@@ -384,9 +402,9 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
           // Directly go to Step 2 without showing any confusing "already exists" alerts!
           setCurrentActiveStudent(docData);
           setExistingStudent(docData);
-          setSelectedStrengths([]);
-          setSelectedWeaknesses([]);
-          setSelfDescription('');
+          setSelectedStrengths(Array.isArray(docData.strengths) ? docData.strengths : []);
+          setSelectedWeaknesses(Array.isArray(docData.weaknesses) ? docData.weaknesses : []);
+          setSelfDescription(isSelfDescriptionEmpty(docData.selfDescription) ? '' : docData.selfDescription);
           setShowExistingAlert(false);
           setStep(2);
           
@@ -573,9 +591,9 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
                   <button
                     onClick={() => {
                       setGeneratedLetter(existingStudent.feedback || '');
-                      setSelectedStrengths(existingStudent.strengths || []);
-                      setSelectedWeaknesses(existingStudent.weaknesses || []);
-                      setSelfDescription(existingStudent.selfDescription || '');
+                      setSelectedStrengths(Array.isArray(existingStudent.strengths) ? existingStudent.strengths : []);
+                      setSelectedWeaknesses(Array.isArray(existingStudent.weaknesses) ? existingStudent.weaknesses : []);
+                      setSelfDescription(isSelfDescriptionEmpty(existingStudent.selfDescription) ? '' : existingStudent.selfDescription);
                       setCurrentActiveStudent(existingStudent);
                       setStep(5);
                     }}
@@ -585,9 +603,9 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
                   </button>
                   <button
                     onClick={() => {
-                      setSelectedStrengths(existingStudent.strengths || []);
-                      setSelectedWeaknesses(existingStudent.weaknesses || []);
-                      setSelfDescription(existingStudent.selfDescription || '');
+                      setSelectedStrengths(Array.isArray(existingStudent.strengths) ? existingStudent.strengths : []);
+                      setSelectedWeaknesses(Array.isArray(existingStudent.weaknesses) ? existingStudent.weaknesses : []);
+                      setSelfDescription(isSelfDescriptionEmpty(existingStudent.selfDescription) ? '' : existingStudent.selfDescription);
                       setCurrentActiveStudent(existingStudent);
                       setShowExistingAlert(false);
                       setStep(2);
@@ -648,7 +666,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
                   <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">{category}</span>
                   <div className="flex flex-wrap gap-1.5">
                     {PRESET_TRAITS.filter(pt => pt.category === category).map((pt) => {
-                      const isSelected = selectedStrengths.some(t => t?.trait === pt?.name);
+                      const isSelected = (Array.isArray(selectedStrengths) ? selectedStrengths : []).some(t => t?.trait === pt?.name);
                       return (
                         <button
                           key={pt?.name || 'trait'}
@@ -669,10 +687,10 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
             </div>
 
             {/* Selected Sliders */}
-            {selectedStrengths.length > 0 && (
+            {(Array.isArray(selectedStrengths) ? selectedStrengths : []).length > 0 && (
               <div className="border-t border-slate-100 pt-4 space-y-4">
                 <span className="text-xs font-bold text-slate-700 block">설정 레벨 (높을수록 더욱 어울리는 나의 강점이에요!):</span>
-                {selectedStrengths.map((item) => (
+                {(Array.isArray(selectedStrengths) ? selectedStrengths : []).map((item) => (
                   <div key={item?.trait || 'trait'} className="bg-rose-50/40 border border-rose-100/40 p-3 rounded-xl space-y-1.5">
                     <div className="flex justify-between items-center">
                       <span className="text-xs font-extrabold text-slate-800">{item?.trait?.split(" (")[0] || ""}</span>
@@ -753,7 +771,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
                   <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">{category}</span>
                   <div className="flex flex-wrap gap-1.5">
                     {PRESET_TRAITS.filter(pt => pt.category === category).map((pt) => {
-                      const isSelected = selectedWeaknesses.some(t => t?.trait === pt?.name);
+                      const isSelected = (Array.isArray(selectedWeaknesses) ? selectedWeaknesses : []).some(t => t?.trait === pt?.name);
                       return (
                         <button
                           key={pt?.name || 'trait'}
@@ -774,10 +792,10 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
             </div>
 
             {/* Selected Sliders */}
-            {selectedWeaknesses.length > 0 && (
+            {(Array.isArray(selectedWeaknesses) ? selectedWeaknesses : []).length > 0 && (
               <div className="border-t border-slate-100 pt-4 space-y-4">
                 <span className="text-xs font-bold text-slate-700 block">설정 레벨 (낮을수록 더욱 극복 노력이 필요해요!):</span>
-                {selectedWeaknesses.map((item) => (
+                {(Array.isArray(selectedWeaknesses) ? selectedWeaknesses : []).map((item) => (
                   <div key={item?.trait || 'trait'} className="bg-indigo-50/40 border border-indigo-100/40 p-3 rounded-xl space-y-1.5">
                     <div className="flex justify-between items-center">
                       <span className="text-xs font-extrabold text-slate-800">{item?.trait?.split(" (")[0] || ""}</span>
