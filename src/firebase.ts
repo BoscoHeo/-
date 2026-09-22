@@ -92,6 +92,45 @@ export async function logoutTeacher(): Promise<void> {
   await signOut(auth);
 }
 
+export async function loginStudentWithServer(
+  classCode: string,
+  name: string,
+  pin: string
+): Promise<{
+  success: boolean;
+  studentId: string;
+  name: string;
+  isNew: boolean;
+  hasSubmittedContent: boolean;
+}> {
+  const base = getApiBaseUrl();
+
+  const res = await fetch(`${base}/auth/student`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ classCode, name, pin }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.token) {
+    throw new Error(data.error || '학생 인증에 실패했습니다.');
+  }
+
+  await signInWithCustomToken(auth, data.token);
+
+  return {
+    success: true,
+    studentId: data.studentId,
+    name: data.name || name,
+    isNew: Boolean(data.isNew),
+    hasSubmittedContent: Boolean(data.hasSubmittedContent),
+  };
+}
+
+export async function logoutStudent(): Promise<void> {
+  await signOut(auth);
+}
+
 export { signInWithCustomToken, signOut };
 
 // Error-Handling Interface from Firebase Integration Skill

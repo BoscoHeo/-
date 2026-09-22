@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Student, TraitItem, AIServiceConfig } from '../types';
 import { PRESET_TRAITS } from '../data/presets';
-import { db, isFirebaseConfigured } from '../firebase';
-import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { db, isFirebaseConfigured, loginStudentWithServer, logoutStudent } from '../firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { generateAIConsult } from '../utils/ai';
 import { 
   Sparkles, Award, ShieldAlert, BookOpen, Send, HelpCircle, 
@@ -97,20 +97,9 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
   const [studentPassword, setStudentPassword] = useState('');
   const [passwordPrefilled, setPasswordPrefilled] = useState(false);
 
-  // Auto-fill password if name and classCode exist in localStorage
+  // SEC-3: 학생 PIN 평문 로컬스토리지 저장 및 자동완성 제거 (보안 강화)
   useEffect(() => {
-    const trimmed = name.trim();
-    if (trimmed && classCode) {
-      const savedPass = safeLocalStorage.getItem(`class_auth_${classCode}_${trimmed}`);
-      if (savedPass) {
-        setStudentPassword(savedPass);
-        setPasswordPrefilled(true);
-      } else {
-        setPasswordPrefilled(false);
-      }
-    } else {
-      setPasswordPrefilled(false);
-    }
+    setPasswordPrefilled(false);
   }, [name, classCode]);
 
   // --- Effect: Validate Class Code on load or change ---
@@ -218,7 +207,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
     setLoadingStepText("작성한 내용을 실시간 학급 기록실 서버에 안전하게 보관하고 있습니다...");
 
     const studentId = currentActiveStudent?.id || `student-${Date.now()}`;
-    const studentPayload: Student = {
+    const studentPayload: any = {
       id: studentId,
       name: name.trim(),
       selfDescription: selfDescription.trim(),
@@ -228,19 +217,19 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
       feedback: '',   // Empty as AI will generate it now
       status: 'generating',
       isFeedbackSent: currentActiveStudent?.isFeedbackSent || false, // Keep sent status if editing
-      password: studentPassword || '' // 저장한 비밀번호 정보
+      ...(currentActiveStudent?.password ? { password: currentActiveStudent.password } : {}),
     };
 
     try {
       // 1. Direct Save to Firestore under subcollection classrooms/{classCode}/students/
       const studentDocRef = doc(db, 'classrooms', classCode, 'students', studentId);
-      await setDoc(studentDocRef, studentPayload);
+      await setDoc(studentDocRef, studentPayload, { merge: true });
 
-      // Save password and name locally to remember this student's ownership
+      // SEC-3: 학생 PIN 평문 로컬스토리지 보관 제거
       try {
-        safeLocalStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
+        safeLocalStorage.removeItem(`class_auth_${classCode}_${name.trim()}`);
       } catch (locErr) {
-        console.warn("LocalStorage caching failed:", locErr);
+        // ignore
       }
 
       // 2. Generate customized personal AI Growth Letter
@@ -305,6 +294,16 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
     }
   };
 
+  // --- SEC-3: Safe Exit Handler with Auth Signout ---
+  const handleExitStudentPortal = async () => {
+    try {
+      await logoutStudent();
+    } catch (e) {
+      // ignore
+    }
+    onBackToHome();
+  };
+
   // --- UI: Select/Validate Classroom Code ---
   if (!classCode || isClassValid === false) {
     return (
@@ -350,7 +349,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
           </button>
 
           <button
-            onClick={onBackToHome}
+            onClick={handleExitStudentPortal}
             className="text-xs text-slate-400 hover:text-slate-600 font-semibold cursor-pointer block mx-auto underline mt-2"
           >
             처음 화면으로 돌아가기
@@ -360,93 +359,51 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
     );
   }
 
-  // --- New Handler: Start or Check Existing Student Record ---
+  // --- SEC-3 Handler: Authenticate Student with Cloud Functions & Custom Token ---
   const handleStartOrCheck = async () => {
     if (!name.trim()) {
       alert("이름을 먼저 입력해 주셔야 시작할 수 있어요!");
       return;
     }
-    if (studentPassword.length !== 4) {
+    if (studentPassword.length !== 4 || !/^\d{4}$/.test(studentPassword)) {
       alert("나만의 간단 비밀번호 숫자 4자리를 정확히 입력해 주세요! (나중에 내 활동 및 편지를 나만 볼 수 있도록 안전하게 지켜줍니다 🔐)");
       return;
     }
-    
+
     setIsCheckingExisting(true);
     setErrorMessage(null);
     try {
-      // Query if this name already exists in classroom students subcollection
-      const q = query(
-        collection(db, 'classrooms', classCode, 'students'),
-        where('name', '==', name.trim())
-      );
-      const querySnapshot = await getDocs(q);
-      
-      if (!querySnapshot.empty) {
-        // Found existing student record!
-        const docData = querySnapshot.docs[0].data() as Student;
-        
-        // Determine if they have actually written/submitted anything (strengths or selfDescription filled)
-        const hasStrengths = Array.isArray(docData.strengths) && docData.strengths.length > 0;
-        const hasWeaknesses = Array.isArray(docData.weaknesses) && docData.weaknesses.length > 0;
-        const hasSelfDesc = !isSelfDescriptionEmpty(docData.selfDescription);
-        
-        const hasSubmittedContent = hasStrengths || hasWeaknesses || hasSelfDesc;
+      // 1. 서버 엔드포인트(/api/auth/student)를 통한 학생 인증 및 Student Custom Token 수신
+      const authResult = await loginStudentWithServer(classCode, name.trim(), studentPassword);
+      const studentId = authResult.studentId;
 
-        if (!hasSubmittedContent) {
-          // Case A: Pre-registered student by teacher or completely empty draft (first login)
-          // Secure with the entered password if they didn't have one set yet
-          if (!docData.password) {
-            const studentDocRef = doc(db, 'classrooms', classCode, 'students', docData.id);
-            await setDoc(studentDocRef, { password: studentPassword }, { merge: true });
-            docData.password = studentPassword;
-          } else if (docData.password !== studentPassword) {
-            // If they did have a password set somehow, enforce it
-            setErrorMessage("⚠️ 비밀번호 오류: 입력한 비밀번호가 등록된 이름의 정보와 일치하지 않습니다. 설정하신 정확한 4자리 숫자를 입력해 주세요. (비밀번호를 모르겠다면 담임 선생님의 대시보드 화면에서도 손쉽게 조회가 가능합니다)");
-            setIsCheckingExisting(false);
-            return;
-          }
+      // 2. 인증 완료 후 본인 문서만 안전하게 단건 조회
+      const studentDocRef = doc(db, 'classrooms', classCode, 'students', studentId);
+      const studentDocSnap = await getDoc(studentDocRef);
 
-          // Directly go to Step 2 without showing any confusing "already exists" alerts!
-          setCurrentActiveStudent(docData);
-          setExistingStudent(docData);
+      if (studentDocSnap.exists()) {
+        const docData = studentDocSnap.data() as Student;
+        // 클라이언트 메모리에서 비밀번호 필드 제거
+        delete (docData as any).password;
+        delete (docData as any).pinHash;
+
+        setCurrentActiveStudent(docData);
+        setExistingStudent(docData);
+
+        if (authResult.hasSubmittedContent) {
+          // 이전에 작성/제출한 내용이 있는 경우: 이전 활동 불러오기 모달 안내
+          setShowExistingAlert(true);
+        } else {
+          // 신규 학생이거나 작성 내용이 없는 경우: 곧바로 강점 선택 Step 2로 이동
           setSelectedStrengths(Array.isArray(docData.strengths) ? docData.strengths : []);
           setSelectedWeaknesses(Array.isArray(docData.weaknesses) ? docData.weaknesses : []);
           setSelfDescription(isSelfDescriptionEmpty(docData.selfDescription) ? '' : docData.selfDescription);
           setShowExistingAlert(false);
           setStep(2);
-          
-          // Save password and name locally to remember this student's ownership
-          safeLocalStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
-        } else {
-          // Case B: They have actually written/submitted content before.
-          if (!docData.password) {
-            // Legacy student without password - set it now and show options
-            const studentDocRef = doc(db, 'classrooms', classCode, 'students', docData.id);
-            const updatedStudent = { ...docData, password: studentPassword };
-            await setDoc(studentDocRef, { password: studentPassword }, { merge: true });
-            
-            setExistingStudent(updatedStudent);
-            setCurrentActiveStudent(updatedStudent);
-            setShowExistingAlert(true);
-            safeLocalStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
-          } else if (docData.password !== studentPassword) {
-            // Password mismatch! Protect individual privacy
-            setErrorMessage("⚠️ 비밀번호 오류: 입력한 비밀번호가 등록된 이름의 정보와 일치하지 않습니다. 다른 사람과 이름이 겹친다면 이름 끝에 학년 반(예: 김민수6_3)을 덧붙여 새로 작성하거나, 설정하신 정확한 4자리 숫자를 입력해 주세요. (비밀번호를 모르겠다면 담임 선생님의 대시보드 화면에서도 손쉽게 조회가 가능합니다)");
-            setExistingStudent(null);
-            setCurrentActiveStudent(null);
-            setShowExistingAlert(false);
-          } else {
-            // Password matched! Allow opening or editing
-            setExistingStudent(docData);
-            setCurrentActiveStudent(docData);
-            setShowExistingAlert(true);
-            safeLocalStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
-          }
         }
       } else {
-        // No existing record, proceed to step 2 safely as a new student
-        const studentId = `student-${Date.now()}`;
-        const tempStudent: Student = {
+        // 서버에서 생성 후 즉시 조회 시 네트워크 지연 대비 fallback
+        const fallbackStudent: Student = {
           id: studentId,
           name: name.trim(),
           selfDescription: '',
@@ -454,29 +411,23 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
           weaknesses: [],
           evaluation: '',
           feedback: '',
-          status: 'idle', // 'idle'로 시작하여 작성 중임을 표시
+          status: 'idle',
           isFeedbackSent: false,
-          password: studentPassword
         };
-
-        // 즉시 Firestore에 저장하여 실시간 대시보드에 학생 이름이 나타나도록 함!
-        const studentDocRef = doc(db, 'classrooms', classCode, 'students', studentId);
-        await setDoc(studentDocRef, tempStudent);
-
-        safeLocalStorage.setItem(`class_auth_${classCode}_${name.trim()}`, studentPassword);
-
+        setCurrentActiveStudent(fallbackStudent);
         setShowExistingAlert(false);
         setExistingStudent(null);
-        setCurrentActiveStudent(tempStudent);
         setSelectedStrengths([]);
         setSelectedWeaknesses([]);
         setSelfDescription('');
         setStep(2);
       }
     } catch (err: any) {
-      console.warn("Error checking existing student, proceeding directly:", err);
-      // Fallback: just proceed
-      setStep(2);
+      console.error("Student auth error:", err);
+      setErrorMessage(err.message || "⚠️ 비밀번호 오류: 입력한 비밀번호가 등록된 이름의 정보와 일치하지 않습니다. 다른 사람과 이름이 겹친다면 이름 끝에 학년 반(예: 김민수6_3)을 덧붙여 새로 작성하거나, 설정하신 정확한 4자리 숫자를 입력해 주세요.");
+      setExistingStudent(null);
+      setCurrentActiveStudent(null);
+      setShowExistingAlert(false);
     } finally {
       setIsCheckingExisting(false);
     }
@@ -487,7 +438,7 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
       {/* Upper Mode Header */}
       <div className="flex justify-between items-center mb-6 no-print">
         <button
-          onClick={onBackToHome}
+          onClick={handleExitStudentPortal}
           className="flex items-center gap-1 text-slate-400 hover:text-slate-800 text-xs font-semibold bg-white border border-slate-200 px-3 py-1.5 rounded-lg cursor-pointer"
         >
           <Home size={13} />
