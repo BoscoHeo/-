@@ -1,9 +1,10 @@
+/// <reference types="vite/client" />
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
-const config = {
+const rawConfig = {
   apiKey: (import.meta.env.VITE_FIREBASE_API_KEY as string) || firebaseConfig.apiKey,
   authDomain: (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string) || firebaseConfig.authDomain,
   projectId: (import.meta.env.VITE_FIREBASE_PROJECT_ID as string) || firebaseConfig.projectId,
@@ -12,6 +13,18 @@ const config = {
   appId: (import.meta.env.VITE_FIREBASE_APP_ID as string) || firebaseConfig.appId,
   measurementId: (import.meta.env.VITE_FIREBASE_MEASUREMENT_ID as string) || firebaseConfig.measurementId,
   firestoreDatabaseId: (import.meta.env.VITE_FIREBASE_DATABASE_ID as string) || firebaseConfig.firestoreDatabaseId
+};
+
+// Fallback config if environment variables or config JSON are missing/empty
+const config = {
+  apiKey: rawConfig.apiKey || "AIzaSyDummyKeyForInitializationOnly",
+  authDomain: rawConfig.authDomain || "dummy.firebaseapp.com",
+  projectId: rawConfig.projectId || "dummy-project",
+  storageBucket: rawConfig.storageBucket || "dummy.appspot.com",
+  messagingSenderId: rawConfig.messagingSenderId || "000000000000",
+  appId: rawConfig.appId || "1:000000000000:web:dummy",
+  measurementId: rawConfig.measurementId || "",
+  firestoreDatabaseId: rawConfig.firestoreDatabaseId || ""
 };
 
 const app = initializeApp(config);
@@ -67,12 +80,20 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
+export const isFirebaseConfigured = Boolean(
+  rawConfig.apiKey &&
+  rawConfig.projectId &&
+  rawConfig.apiKey !== "AIzaSyDummyKeyForInitializationOnly" &&
+  rawConfig.projectId !== "dummy-project"
+);
+
 async function testConnection() {
+  if (!isFirebaseConfigured) return;
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
+      console.warn("Firestore connection check: Client is offline or Firebase project unreachable.");
     }
   }
 }

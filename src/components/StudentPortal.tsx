@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Student, TraitItem, AIServiceConfig } from '../types';
 import { PRESET_TRAITS } from '../data/presets';
-import { db } from '../firebase';
+import { db, isFirebaseConfigured } from '../firebase';
 import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { generateAIConsult } from '../utils/ai';
 import { 
@@ -122,6 +122,12 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
 
     const checkClassRef = async () => {
       setIsCheckingClass(true);
+      if (!isFirebaseConfigured) {
+        setClassRoomName('우리 학급 (로컬 모드)');
+        setIsClassValid(true);
+        setIsCheckingClass(false);
+        return;
+      }
       try {
         const docRef = doc(db, 'classrooms', classCode);
         const docSnap = await getDoc(docRef);
@@ -136,8 +142,9 @@ export default function StudentPortal({ apiConfig, onBackToHome }: StudentPortal
           setIsClassValid(false);
         }
       } catch (err) {
-        console.error("Error connecting to Firestore class document:", err);
-        setIsClassValid(false);
+        console.warn("Could not reach Firestore class document (using local mode):", err);
+        setClassRoomName('우리 학급 (로컬 모드)');
+        setIsClassValid(true);
       } finally {
         setIsCheckingClass(false);
       }

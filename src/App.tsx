@@ -13,7 +13,7 @@ import ExcelPasteModal from './components/ExcelPasteModal';
 import StudentPortal from './components/StudentPortal';
 
 // Direct Firebase cloud connection
-import { db } from './firebase';
+import { db, isFirebaseConfigured } from './firebase';
 import { collection, doc, onSnapshot, setDoc, deleteDoc, getDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { generateAIConsult } from './utils/ai';
 
@@ -93,7 +93,7 @@ export default function App() {
 
   // Synchronize active classroom apiConfig on boot or code loading
   useEffect(() => {
-    if (!classCode) return;
+    if (!classCode || !isFirebaseConfigured) return;
     const fetchClassroomConfig = async () => {
       try {
         const docSnap = await getDoc(doc(db, 'classrooms', classCode));
@@ -110,7 +110,7 @@ export default function App() {
           }
         }
       } catch (err) {
-        console.error("Error loading classroom config from Firestore:", err);
+        console.warn("Classroom config load notice (using local storage):", err);
       }
     };
     fetchClassroomConfig();
@@ -125,7 +125,7 @@ export default function App() {
 
   // Real-time Cloud Streaming via onSnapshot (No polling necessary!)
   useEffect(() => {
-    if (appMode !== 'teacher' || !classCode) return;
+    if (appMode !== 'teacher' || !classCode || !isFirebaseConfigured) return;
 
     const studentsCollectionRef = collection(db, 'classrooms', classCode, 'students');
     
@@ -152,7 +152,7 @@ export default function App() {
         setSelectedStudentId(null);
       }
     }, (error) => {
-      console.error("Firestore real-time subscription error:", error);
+      console.warn("Firestore real-time subscription notice:", error);
     });
 
     return () => unsubscribe();
