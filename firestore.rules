@@ -1,18 +1,30 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Catch-all default deny
+    // Default Deny: 명시적으로 허용되지 않은 모든 경로 차단
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Classroom space rules - fully opened to prevent any list/write permission blockages
-    match /classrooms/{document=**} {
+    // 1. 학급 루트 문서: 단일 깊이만 매칭 (하위 secret/students로 allow가 전파되지 않음)
+    // SEC-6 최소권한 Rules 전까지 기존 클라이언트 기능(학급 조회, 설정 동기화 등) 유지
+    match /classrooms/{classCode} {
       allow read, write: if true;
     }
 
-    // Test connection path
+    // 2. 학생 서브컬렉션: SEC-6 전까지 기존 학생/교사 읽기 및 쓰기 유지
+    match /classrooms/{classCode}/students/{studentId} {
+      allow read, write: if true;
+    }
+
+    // 3. 보안 서브컬렉션: Client SDK / 외부 REST 직접 접근 전면 차단 (서버 Cloud Functions Admin SDK 전용)
+    match /classrooms/{classCode}/secret/{document=**} {
+      allow read, write: if false;
+    }
+
+    // 4. 앱 연결 상태 확인용 테스트 경로
     match /test/{document=**} {
       allow read, write: if true;
     }
