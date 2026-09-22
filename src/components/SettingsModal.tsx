@@ -25,8 +25,21 @@ export default function SettingsModal({ isOpen, onClose, config, onSave, classCo
 
   useEffect(() => {
     if (isOpen) {
+      try {
+        const stored = localStorage.getItem('ai_evaluator_config');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed.apiKey) {
+            delete parsed.apiKey;
+            localStorage.setItem('ai_evaluator_config', JSON.stringify(parsed));
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+
       setService(config.service);
-      setApiKey(config.apiKey || '');
+      setApiKey('');
       setModel(config.model || '');
       setClassPassword(classroomPassword || '');
       setFeedbackTone(config.feedbackTone || 'gentle');
@@ -38,7 +51,8 @@ export default function SettingsModal({ isOpen, onClose, config, onSave, classCo
   const handleSave = () => {
     onSave({
       service,
-      apiKey: service === 'built-in' ? undefined : apiKey,
+      apiKey: service === 'built-in' ? undefined : (apiKey.trim() ? apiKey.trim() : undefined),
+      hasKey: service === 'built-in' ? false : (apiKey.trim() ? true : config.hasKey),
       model: service === 'built-in' ? undefined : model,
       feedbackTone,
       feedbackCustomInstruction
@@ -117,7 +131,11 @@ export default function SettingsModal({ isOpen, onClose, config, onSave, classCo
                     type={showKey ? "text" : "password"}
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={service === 'custom-openai' ? "sk-..." : "AI..."}
+                    placeholder={
+                      config.hasKey && !apiKey
+                        ? "보안 금고에 등록된 키 유지 중 (변경 시 새로 입력)"
+                        : (service === 'custom-openai' ? "sk-..." : "AI...")
+                    }
                     className="w-full pl-4 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-indigo-100 focus:bg-white focus:border-indigo-500 transition-all text-slate-800"
                   />
                   <button
@@ -150,7 +168,7 @@ export default function SettingsModal({ isOpen, onClose, config, onSave, classCo
               {/* Warning Alert */}
               <div className="bg-amber-50/50 border border-amber-100 p-3.5 rounded-xl text-xs text-amber-800 leading-relaxed font-light flex gap-2">
                 <ShieldAlert size={22} className="text-amber-600 shrink-0 mt-0.5" />
-                <span>개인 인증 키 정보는 브라우저 내부 로컬스토리지에만 보관하고 작동되어 외부로 안전히 차단 및 암호 보호를 제공합니다.</span>
+                <span>개인 인증 키 정보는 브라우저 로컬스토리지에 저장되지 않고, Firebase 서버 보안 금고(Firestore Secret)에 안전히 보관되어 학생 및 외부 노출이 원천 차단됩니다.</span>
               </div>
             </>
           )}

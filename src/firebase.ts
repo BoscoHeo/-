@@ -3,6 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithCustomToken, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
+import { AIServiceConfig } from './types';
 
 const rawConfig = {
   apiKey: (import.meta.env.VITE_FIREBASE_API_KEY as string) || firebaseConfig.apiKey,
@@ -129,6 +130,87 @@ export async function loginStudentWithServer(
 
 export async function logoutStudent(): Promise<void> {
   await signOut(auth);
+}
+
+export async function saveAiConfigWithServer(
+  classCode: string,
+  config: {
+    service: 'built-in' | 'custom-gemini' | 'custom-openai';
+    apiKey?: string;
+    model?: string;
+    feedbackTone?: string;
+    feedbackCustomInstruction?: string;
+  }
+): Promise<{ success: boolean; hasKey: boolean; service: string; model?: string }> {
+  const base = getApiBaseUrl();
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('교사 인증 세션이 필요합니다.');
+  const idToken = await currentUser.getIdToken();
+
+  const res = await fetch(`${base}/ai/config`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({ classCode, ...config }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'AI 설정 저장에 실패했습니다.');
+  return data;
+}
+
+export async function getAiConfigWithServer(
+  classCode: string
+): Promise<AIServiceConfig> {
+  const base = getApiBaseUrl();
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('교사 인증 세션이 필요합니다.');
+  const idToken = await currentUser.getIdToken();
+
+  const res = await fetch(`${base}/ai/config?classCode=${encodeURIComponent(classCode.trim().toUpperCase())}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+    },
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'AI 설정을 불러오지 못했습니다.');
+  return data;
+}
+
+export async function callAiConsultWithServer(params: {
+  classCode: string;
+  type: 'evaluation' | 'feedback';
+  student: {
+    id: string;
+    name: string;
+    strengths: any[];
+    weaknesses: any[];
+    selfDescription?: string;
+  };
+}): Promise<string> {
+  const base = getApiBaseUrl();
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('인증 세션이 필요합니다. 다시 로그인해 주세요.');
+  const idToken = await currentUser.getIdToken();
+
+  const res = await fetch(`${base}/ai/consult`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify(params),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.result) {
+    throw new Error(data.error || 'AI 생성에 실패했습니다.');
+  }
+  return data.result;
 }
 
 export { signInWithCustomToken, signOut };

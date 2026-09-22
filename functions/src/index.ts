@@ -422,7 +422,333 @@ async function handleStudentAuth(req: Request, res: Response): Promise<void> {
   }
 }
 
-// 8. Express 앱 구성
+// 8. 토큰 검증 헬퍼 (Firebase ID Token)
+async function verifyAuthToken(req: Request): Promise<{ uid: string; role?: string; classCode?: string; studentId?: string } | null> {
+  const authHeader = req.headers.authorization;
+  let idToken: string | undefined;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    idToken = authHeader.split("Bearer ")[1].trim();
+  } else if (req.body && typeof req.body.token === "string") {
+    idToken = req.body.token.trim();
+  }
+
+  if (!idToken) return null;
+
+  try {
+    const decoded = await getAuth().verifyIdToken(idToken);
+    return {
+      uid: decoded.uid,
+      role: decoded.role as string | undefined,
+      classCode: decoded.classCode as string | undefined,
+      studentId: decoded.studentId as string | undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// 9. 서버 전용 AI 설정 로드 (1순위: classrooms/{classCode}/secret/aiConfig, 2순위: legacy classrooms/{classCode}.apiConfig)
+async function getAiConfigForClassroom(classCode: string): Promise<{
+  service: string;
+  apiKey?: string;
+  model?: string;
+  feedbackTone?: string;
+  feedbackCustomInstruction?: string;
+}> {
+  // 1순위: server-only secret 서브문서
+  try {
+    const secretSnap = await db.collection("classrooms").doc(classCode).collection("secret").doc("aiConfig").get();
+    if (secretSnap.exists) {
+      const data = secretSnap.data();
+      return {
+        service: data?.service || "built-in",
+        apiKey: data?.apiKey,
+        model: data?.model,
+        feedbackTone: data?.feedbackTone,
+        feedbackCustomInstruction: data?.feedbackCustomInstruction,
+      };
+    }
+  } catch (err) {
+    console.error("secret aiConfig 조회 실패 (fallback 시도):", err instanceof Error ? err.message : "Error");
+  }
+
+  // 2순위: legacy classroom 문서 apiConfig fallback (SEC-5 전 점진적 호환)
+  try {
+    const classSnap = await db.collection("classrooms").doc(classCode).get();
+    if (classSnap.exists) {
+      const data = classSnap.data();
+      if (data?.apiConfig) {
+        return {
+          service: data.apiConfig.service || "built-in",
+          apiKey: data.apiConfig.apiKey,
+          model: data.apiConfig.model,
+          feedbackTone: data.apiConfig.feedbackTone,
+          feedbackCustomInstruction: data.apiConfig.feedbackCustomInstruction,
+        };
+      }
+    }
+  } catch (err) {
+    console.error("legacy apiConfig 조회 실패:", err instanceof Error ? err.message : "Error");
+  }
+
+  return { service: "built-in" };
+}
+
+// 10. 교사 AI 설정 저장 (POST /api/ai/config)
+async function handleAiConfigSave(req: Request, res: Response): Promise<void> {
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "허용되지 않은 HTTP 메서드입니다." });
+    return;
+  }
+
+  const authUser = await verifyAuthToken(req);
+  if (!authUser) {
+    res.status(401).json({ error: "인증 토큰이 유효하지 않습니다." });
+    return;
+  }
+
+  const { classCode, service, apiKey, model, feedbackTone, feedbackCustomInstruction } = req.body || {};
+  const trimmedCode = typeof classCode === "string" ? classCode.trim().toUpperCase() : "";
+
+  if (!trimmedCode) {
+    res.status(400).json({ error: "학급 코드가 필요합니다." });
+    return;
+  }
+
+  // 교사 권한 및 본인 학급 여부 검증
+  if (authUser.role !== "teacher" || authUser.classCode !== trimmedCode) {
+    res.status(403).json({ error: "해당 학급의 AI 설정을 변경할 수 있는 교사 권한이 없습니다." });
+    return;
+  }
+
+  try {
+    const secretDocRef = db.collection("classrooms").doc(trimmedCode).collection("secret").doc("aiConfig");
+    const existingSnap = await secretDocRef.get();
+    const existingData = existingSnap.data();
+
+    // API Key 처리: 새 키가 전달되면 업데이트, 빈 문자열이면 기존 키 유지 (built-in 선택 시 제거)
+    let finalApiKey: string | undefined = undefined;
+    if (service === "built-in") {
+      finalApiKey = undefined;
+    } else if (typeof apiKey === "string" && apiKey.trim()) {
+      finalApiKey = apiKey.trim();
+    } else if (existingData?.apiKey) {
+      finalApiKey = existingData.apiKey;
+    }
+
+    const newConfigData = {
+      service: service || "built-in",
+      apiKey: finalApiKey,
+      model: typeof model === "string" ? model.trim() : undefined,
+      feedbackTone: typeof feedbackTone === "string" ? feedbackTone.trim() : undefined,
+      feedbackCustomInstruction: typeof feedbackCustomInstruction === "string" ? feedbackCustomInstruction.trim() : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await secretDocRef.set(newConfigData, { merge: true });
+
+    // 응답 시 apiKey 원문은 절대 노출하지 않고 hasKey 플래그만 반환
+    res.status(200).json({
+      success: true,
+      hasKey: Boolean(finalApiKey),
+      service: newConfigData.service,
+      model: newConfigData.model,
+      feedbackTone: newConfigData.feedbackTone,
+      feedbackCustomInstruction: newConfigData.feedbackCustomInstruction,
+    });
+  } catch (error) {
+    console.error("AI 설정 저장 중 서버 오류 발생:", error instanceof Error ? error.message : "알 수 없는 오류");
+    res.status(500).json({ error: "AI 설정 저장 중 서버 오류가 발생했습니다." });
+  }
+}
+
+// 11. 교사 AI 설정 조회 (GET /api/ai/config?classCode=...)
+async function handleAiConfigGet(req: Request, res: Response): Promise<void> {
+  if (req.method !== "GET") {
+    res.status(405).json({ error: "허용되지 않은 HTTP 메서드입니다." });
+    return;
+  }
+
+  const authUser = await verifyAuthToken(req);
+  if (!authUser) {
+    res.status(401).json({ error: "인증 토큰이 유효하지 않습니다." });
+    return;
+  }
+
+  const rawCode = req.query.code || req.query.classCode;
+  const trimmedCode = typeof rawCode === "string" ? rawCode.trim().toUpperCase() : "";
+
+  if (!trimmedCode) {
+    res.status(400).json({ error: "학급 코드가 필요합니다." });
+    return;
+  }
+
+  if (authUser.role !== "teacher" || authUser.classCode !== trimmedCode) {
+    res.status(403).json({ error: "해당 학급의 AI 설정을 조회할 권한이 없습니다." });
+    return;
+  }
+
+  try {
+    const config = await getAiConfigForClassroom(trimmedCode);
+    res.status(200).json({
+      success: true,
+      hasKey: Boolean(config.apiKey),
+      service: config.service,
+      model: config.model,
+      feedbackTone: config.feedbackTone,
+      feedbackCustomInstruction: config.feedbackCustomInstruction,
+    });
+  } catch (error) {
+    console.error("AI 설정 조회 중 서버 오류 발생:", error instanceof Error ? error.message : "알 수 없는 오류");
+    res.status(500).json({ error: "AI 설정 조회 중 서버 오류가 발생했습니다." });
+  }
+}
+
+// 12. AI 생성 프록시 핸들러 (POST /api/ai/consult)
+async function handleAiConsult(req: Request, res: Response): Promise<void> {
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "허용되지 않은 HTTP 메서드입니다." });
+    return;
+  }
+
+  const authUser = await verifyAuthToken(req);
+  if (!authUser) {
+    res.status(401).json({ error: "인증 토큰이 유효하지 않습니다." });
+    return;
+  }
+
+  const { classCode, type, student } = req.body || {};
+  const trimmedCode = typeof classCode === "string" ? classCode.trim().toUpperCase() : "";
+
+  if (!trimmedCode || !type || !student) {
+    res.status(400).json({ error: "필수 요청 정보(학급코드, 타입, 학생 정보)가 누락되었습니다." });
+    return;
+  }
+
+  // 권한 검증: 교사이거나 본인 studentId와 일치하는 학생만 허용
+  const isTeacher = authUser.role === "teacher" && authUser.classCode === trimmedCode;
+  const isStudent = authUser.role === "student" && authUser.classCode === trimmedCode && authUser.studentId === student.id;
+
+  if (!isTeacher && !isStudent) {
+    res.status(403).json({ error: "해당 학급의 AI 생성 기능을 호출할 권한이 없습니다." });
+    return;
+  }
+
+  try {
+    const aiConfig = await getAiConfigForClassroom(trimmedCode);
+
+    const { name, strengths, weaknesses, selfDescription } = student;
+    const strengthsStr = Array.isArray(strengths)
+      ? strengths.map((s: any) => `${s.trait}(${s.rating}점)`).join(", ")
+      : "";
+    const weaknessesStr = Array.isArray(weaknesses)
+      ? weaknesses.map((w: any) => `${w.trait}(${w.rating}점)`).join(", ")
+      : "";
+
+    let prompt = "";
+    let systemInstruction = "";
+
+    if (type === "evaluation") {
+      systemInstruction = "너는 학생 지도 경력이 풍부하고 따뜻한 시각을 지닌 대한민국의 노련한 초중고 학급 담임 교사야.";
+      prompt = `다음 학생의 핵심 특성을 바탕으로 학교 학교생활기록부 기재용 '행동특성 및 종합의견' 평가문을 정성껏 작성해주세요.
+
+[학생 정보]
+이름: ${name || "학생"}
+강점(장점): ${strengthsStr || "없음"}
+약점(보완점): ${weaknessesStr || "없음"}
+학생 본인의 자기평가 내용: ${selfDescription || "없음"}
+
+[중요 작성 규칙 - 반드시 지킬 것]
+1. 통지표 및 생활기록부의 모든 문장은 반드시 어미가 '~함.' 또는 '~임.'으로만 끝나야 합니다.
+2. 문장이 끝나도 절대 줄을 바꾸지 말고 온점 뒤에 공백 한 칸을 두고 이어서 기록하십시오.
+3. 영문 알파벳과 특수문자는 절대 기재하지 마십시오. (단위 cm, kg 등 제외)
+4. 길이는 공백 포함 300자 이상 400자 이하로 하나의 긴 단락으로 작성해 주십시오.`;
+    } else {
+      // type === "feedback"
+      systemInstruction = "너는 교실에서 늘 함께 머무는 대한민국의 다정한 담임 선생님이야. 학생이 작성한 자기평가를 읽고 따뜻한 위로와 격려 편지를 전하고 있어.";
+      prompt = `선생님이 우리 반 ${name || "학생"}의 자기 성찰 일지를 읽고 마음 편지를 작성하고 있어.
+
+[학생의 자기 평가 정보]
+이름: ${name || "학생"}
+선택한 나의 장점: ${strengthsStr || "없음"}
+노력하고 싶은 점: ${weaknessesStr || "없음"}
+자기평가: ${selfDescription || "없음"}
+
+[편지 작성 지침]
+1. 다정하고 부드러운 교사의 온기 있는 문체로 작성해줘.
+2. 생활기록부, AI 같은 행정적 단어는 일절 배제해줘.
+3. 300자에서 450자 안팎으로 작성해줘.`;
+    }
+
+    let generatedText = "";
+
+    if (aiConfig.service === "custom-openai" && aiConfig.apiKey) {
+      const openAiModel = aiConfig.model || "gpt-4o-mini";
+      const openAiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${aiConfig.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: openAiModel,
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: prompt },
+          ],
+          temperature: 0.7,
+        }),
+      });
+
+      if (!openAiRes.ok) {
+        const errText = await openAiRes.text();
+        throw new Error(`OpenAI 호출 실패 (${openAiRes.status}): ${errText}`);
+      }
+      const data: any = await openAiRes.json();
+      generatedText = data.choices?.[0]?.message?.content?.trim() || "";
+    } else {
+      // Gemini 호출 (custom-gemini 또는 built-in)
+      const geminiApiKey = (aiConfig.service === "custom-gemini" && aiConfig.apiKey)
+        ? aiConfig.apiKey
+        : process.env.GEMINI_API_KEY;
+
+      if (!geminiApiKey) {
+        throw new Error("서버에 사용 가능한 Gemini API Key가 설정되어 있지 않습니다. 우측 상단 'AI 서비스 설정'에서 개인 API Key를 등록해 주세요.");
+      }
+
+      const geminiModel = aiConfig.model || "gemini-2.5-flash";
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiApiKey}`;
+
+      const geminiRes = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          generationConfig: { temperature: 0.7 },
+        }),
+      });
+
+      if (!geminiRes.ok) {
+        const errText = await geminiRes.text();
+        throw new Error(`Gemini 호출 실패 (${geminiRes.status}): ${errText}`);
+      }
+
+      const data: any = await geminiRes.json();
+      generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+    }
+
+    res.status(200).json({
+      success: true,
+      result: generatedText,
+    });
+  } catch (error) {
+    console.error("AI 생성 중 서버 오류 발생:", error instanceof Error ? error.message : "알 수 없는 오류");
+    res.status(500).json({ error: error instanceof Error ? error.message : "AI 생성 중 서버 오류가 발생했습니다." });
+  }
+}
+
+// 13. Express 앱 구성
 const app = express();
 app.disable("x-powered-by");
 app.use(express.json());
@@ -438,7 +764,15 @@ app.post("/api/auth/teacher", handleTeacherAuth);
 app.post("/auth/student", handleStudentAuth);
 app.post("/api/auth/student", handleStudentAuth);
 
-// 9. Cloud Functions 2nd Gen HTTPS 엔드포인트 내보내기
+app.post("/ai/config", handleAiConfigSave);
+app.post("/api/ai/config", handleAiConfigSave);
+app.get("/ai/config", handleAiConfigGet);
+app.get("/api/ai/config", handleAiConfigGet);
+
+app.post("/ai/consult", handleAiConsult);
+app.post("/api/ai/consult", handleAiConsult);
+
+// 14. Cloud Functions 2nd Gen HTTPS 엔드포인트 내보내기
 export const api = onRequest(
   {
     region: "asia-northeast3",
@@ -478,5 +812,31 @@ export const studentAuth = onRequest(
   },
   async (req, res) => {
     await handleStudentAuth(req, res);
+  }
+);
+
+export const aiConfig = onRequest(
+  {
+    region: "asia-northeast3",
+    cors: ALLOWED_ORIGINS,
+    invoker: "public",
+  },
+  async (req, res) => {
+    if (req.method === "POST") {
+      await handleAiConfigSave(req, res);
+    } else {
+      await handleAiConfigGet(req, res);
+    }
+  }
+);
+
+export const aiConsult = onRequest(
+  {
+    region: "asia-northeast3",
+    cors: ALLOWED_ORIGINS,
+    invoker: "public",
+  },
+  async (req, res) => {
+    await handleAiConsult(req, res);
   }
 );

@@ -21,6 +21,7 @@ export interface Student {
 export interface AIServiceConfig {
   service: 'built-in' | 'custom-gemini' | 'custom-openai';
   apiKey?: string;
+  hasKey?: boolean;
   model?: string;
   feedbackTone?: 'gentle' | 'respectful' | 'humorous' | 'poetic' | 'mentor' | 'custom';
   feedbackCustomInstruction?: string;

@@ -13,7 +13,7 @@ import ExcelPasteModal from './components/ExcelPasteModal';
 import StudentPortal from './components/StudentPortal';
 
 // Direct Firebase cloud connection
-import { db, isFirebaseConfigured, loginTeacherWithServer, logoutTeacher } from './firebase';
+import { db, isFirebaseConfigured, loginTeacherWithServer, logoutTeacher, saveAiConfigWithServer, getAiConfigWithServer } from './firebase';
 import { collection, doc, onSnapshot, setDoc, deleteDoc, getDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { generateAIConsult } from './utils/ai';
 
@@ -80,11 +80,16 @@ export default function App() {
       localStorage.setItem('teacher_class_code', queryClass.toUpperCase());
     }
 
-    // 2. Load config from localstorage
+    // 2. Load config from localstorage (with apiKey sanitization)
     const savedConfig = localStorage.getItem('ai_evaluator_config');
     if (savedConfig) {
       try {
-        setApiConfig(JSON.parse(savedConfig));
+        const parsed = JSON.parse(savedConfig);
+        if (parsed.apiKey) {
+          delete parsed.apiKey;
+          localStorage.setItem('ai_evaluator_config', JSON.stringify(parsed));
+        }
+        setApiConfig(parsed);
       } catch (e) {
         console.error('Error parsing config', e);
       }
@@ -96,12 +101,25 @@ export default function App() {
     if (!classCode || !isFirebaseConfigured) return;
     const fetchClassroomConfig = async () => {
       try {
+        // SEC-4: getAiConfigWithServer를 통해 민감 키가 없는 안전한 설정(hasKey, service, model 등)만 조회
+        const serverConfig = await getAiConfigWithServer(classCode);
+        if (serverConfig) {
+          setApiConfig(serverConfig);
+          const safeConfig = { ...serverConfig };
+          delete (safeConfig as Record<string, any>).apiKey;
+          localStorage.setItem('ai_evaluator_config', JSON.stringify(safeConfig));
+          return;
+        }
+
+        // Fallback: 비로그인 상태이거나 서버 통신 실패 시 레거시 문서 조회 (apiKey는 즉시 배제)
         const docSnap = await getDoc(doc(db, 'classrooms', classCode));
         if (docSnap.exists()) {
           const data = docSnap.data();
           if (data.apiConfig) {
-            setApiConfig(data.apiConfig);
-            localStorage.setItem('ai_evaluator_config', JSON.stringify(data.apiConfig));
+            const safeConfig = { ...data.apiConfig };
+            delete safeConfig.apiKey;
+            setApiConfig(safeConfig);
+            localStorage.setItem('ai_evaluator_config', JSON.stringify(safeConfig));
           }
           // SEC-2: 교사 비밀번호를 클라이언트에 동기화하거나 로컬스토리지에 평문으로 저장하는 동작 제거
         }
@@ -486,7 +504,8 @@ export default function App() {
       const rawResult = await generateAIConsult({
         student: activeStudent,
         type,
-        config: apiConfig
+        config: apiConfig,
+        classCode: classCode || undefined
       });
 
       if (classCode) {
@@ -573,7 +592,8 @@ export default function App() {
         const finalEval = await generateAIConsult({
           student: target,
           type: 'evaluation',
-          config: apiConfig
+          config: apiConfig,
+          classCode: classCode || undefined
         }).catch(err => `[평가 오류]: ${err.message || '생성 실패'}`);
 
         // Polite delay (Sleep 1.1s) to prevent API throttling rate limit blocks
@@ -583,7 +603,8 @@ export default function App() {
         const finalFeedback = await generateAIConsult({
           student: target,
           type: 'feedback',
-          config: apiConfig
+          config: apiConfig,
+          classCode: classCode || undefined
         }).catch(err => `[상담 오류]: ${err.message || '생성 실패'}`);
 
         // Save progress back to state
@@ -732,13 +753,32 @@ export default function App() {
 
   // Configuration Modal Save
   const handleSaveConfig = async (newConfig: AIServiceConfig, updatedClassroomPassword?: string) => {
-    setApiConfig(newConfig);
-    localStorage.setItem('ai_evaluator_config', JSON.stringify(newConfig));
+    // 1. 민감 키를 배제한 안전한 클라이언트 설정 객체 생성
+    const safeConfig: AIServiceConfig = {
+      service: newConfig.service,
+      model: newConfig.model,
+      feedbackTone: newConfig.feedbackTone,
+      feedbackCustomInstruction: newConfig.feedbackCustomInstruction,
+      hasKey: !!(newConfig.apiKey || newConfig.hasKey)
+    };
+
+    setApiConfig(safeConfig);
+    localStorage.setItem('ai_evaluator_config', JSON.stringify(safeConfig));
 
     if (classCode) {
       try {
+        // 2. SEC-4: API Key 및 AI 설정은 Cloud Functions 보안 서버(/api/ai/config)를 통해 Secret 하위 컬렉션에 저장
+        await saveAiConfigWithServer(classCode, {
+          service: newConfig.service,
+          apiKey: newConfig.apiKey,
+          model: newConfig.model,
+          feedbackTone: newConfig.feedbackTone,
+          feedbackCustomInstruction: newConfig.feedbackCustomInstruction,
+        });
+
+        // 3. classrooms/{classCode} 루트 문서에는 민감 키(apiKey)를 배제한 메타데이터만 동기화
         const updateData: any = {
-          apiConfig: newConfig
+          apiConfig: safeConfig
         };
         if (updatedClassroomPassword !== undefined) {
           if (!updatedClassroomPassword.trim()) {
@@ -751,7 +791,7 @@ export default function App() {
           localStorage.setItem(`teacher_pwd_for_${classCode}`, updatedClassroomPassword.trim());
         }
         await setDoc(doc(db, 'classrooms', classCode), updateData, { merge: true });
-        console.log("Successfully persisted apiConfig & password to Firestore for classroom:", classCode);
+        console.log("Successfully persisted safe apiConfig & password to Firestore for classroom:", classCode);
       } catch (err) {
         console.error("Error persisting config to Firestore:", err);
       }
