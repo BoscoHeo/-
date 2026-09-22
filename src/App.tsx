@@ -13,7 +13,7 @@ import ExcelPasteModal from './components/ExcelPasteModal';
 import StudentPortal from './components/StudentPortal';
 
 // Direct Firebase cloud connection
-import { db, isFirebaseConfigured } from './firebase';
+import { db, isFirebaseConfigured, loginTeacherWithServer, logoutTeacher } from './firebase';
 import { collection, doc, onSnapshot, setDoc, deleteDoc, getDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { generateAIConsult } from './utils/ai';
 
@@ -103,11 +103,7 @@ export default function App() {
             setApiConfig(data.apiConfig);
             localStorage.setItem('ai_evaluator_config', JSON.stringify(data.apiConfig));
           }
-          if (data.password) {
-            setClassPassword(data.password);
-            localStorage.setItem('teacher_class_password', data.password);
-            localStorage.setItem(`teacher_pwd_for_${classCode}`, data.password);
-          }
+          // SEC-2: 교사 비밀번호를 클라이언트에 동기화하거나 로컬스토리지에 평문으로 저장하는 동작 제거
         }
       } catch (err) {
         console.warn("Classroom config load notice (using local storage):", err);
@@ -218,13 +214,20 @@ export default function App() {
         password: tempCreatePassword.trim() // 교사용 관리 비밀번호 저장
       });
 
+      // SEC-2: 방 개설 후 서버 로그인 및 Firebase Auth Custom Token 세션 수립
+      try {
+        await loginTeacherWithServer(code, tempCreatePassword.trim());
+      } catch (authErr) {
+        console.warn("기록실 개설 후 자동 인증 세션 수립 알림:", authErr);
+      }
+
       setClassCode(code);
       setClassName(tempClassName.trim());
-      setClassPassword(tempCreatePassword.trim());
+      setClassPassword(''); // 브라우저 메모리에 평문 비밀번호 보관 제거
+      localStorage.removeItem('teacher_class_password');
+      localStorage.removeItem(`teacher_pwd_for_${code}`);
       localStorage.setItem('teacher_class_code', code);
       localStorage.setItem('teacher_class_name', tempClassName.trim());
-      localStorage.setItem('teacher_class_password', tempCreatePassword.trim());
-      localStorage.setItem(`teacher_pwd_for_${code}`, tempCreatePassword.trim());
 
       // Update history list
       const updatedHistory = [{ code, name: tempClassName.trim() }, ...recentClasses.filter(c => c.code !== code)].slice(0, 10);
@@ -246,103 +249,41 @@ export default function App() {
       alert("진입하실 6자리 코드를 기재해 주십시오.");
       return;
     }
-    const enteredCode = tempClassCode.toUpperCase();
+    const enteredCode = tempClassCode.toUpperCase().trim();
 
     try {
-      const docSnap = await getDoc(doc(db, 'classrooms', enteredCode));
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        
-        // 비밀번호 대조
-        const savedPassword = data.password;
-        if (savedPassword) {
-          if (savedPassword !== tempLoginPassword.trim()) {
-            alert("❌ 비밀번호 오류: 기재하신 교사용 관리 비밀번호가 일치하지 않습니다. 해당 학급의 기록방 방장 선생님이 정하신 고유 관리 열쇠를 정확히 입력해 주세요!");
-            return;
-          }
-        }
-        
-        const rName = data.name || '우리 학급';
-        
-        setClassCode(enteredCode);
-        setClassName(rName);
-        if (savedPassword) {
-          setClassPassword(savedPassword);
-          localStorage.setItem('teacher_class_password', savedPassword);
-          localStorage.setItem(`teacher_pwd_for_${enteredCode}`, savedPassword);
-        } else {
-          setClassPassword('');
-          localStorage.removeItem('teacher_class_password');
-        }
-        localStorage.setItem('teacher_class_code', enteredCode);
-        localStorage.setItem('teacher_class_name', rName);
+      // SEC-2: 서버 엔드포인트(/api/auth/teacher)를 통해 비밀번호를 검증하고 Custom Token 수신
+      const authResult = await loginTeacherWithServer(enteredCode, tempLoginPassword.trim());
+      const rName = authResult.name || '우리 학급';
 
-        if (data.apiConfig) {
-          setApiConfig(data.apiConfig);
-          localStorage.setItem('ai_evaluator_config', JSON.stringify(data.apiConfig));
-        }
+      setClassCode(enteredCode);
+      setClassName(rName);
+      setClassPassword(''); // 브라우저 평문 보관 제거
+      localStorage.removeItem('teacher_class_password');
+      localStorage.removeItem(`teacher_pwd_for_${enteredCode}`);
 
-        // Update history list
-        const updatedHistory = [{ code: enteredCode, name: rName }, ...recentClasses.filter(c => c.code !== enteredCode)].slice(0, 10);
-        setRecentClasses(updatedHistory);
-        localStorage.setItem('teacher_class_history', JSON.stringify(updatedHistory));
-        setTempClassCode('');
-        setTempLoginPassword('');
-      } else {
-        alert("입력하신 고유코드에 해당하는 활성화된 기록실이 없습니다. 명확한 코드를 재확인해 보세요!");
-      }
-    } catch (err) {
-      console.error("Error entering classroom in Firestore:", err);
-      alert("학급 입장 중 오류가 발생했습니다.");
+      localStorage.setItem('teacher_class_code', enteredCode);
+      localStorage.setItem('teacher_class_name', rName);
+
+      // Update history list
+      const updatedHistory = [{ code: enteredCode, name: rName }, ...recentClasses.filter(c => c.code !== enteredCode)].slice(0, 10);
+      setRecentClasses(updatedHistory);
+      localStorage.setItem('teacher_class_history', JSON.stringify(updatedHistory));
+      setTempClassCode('');
+      setTempLoginPassword('');
+    } catch (err: any) {
+      console.error("Error entering classroom:", err);
+      alert(err.message || "❌ 로그인 실패: 학급 코드 또는 교사용 관리 비밀번호가 올바르지 않습니다.");
     }
   };
 
   const handleEnterRecentClassroom = async (code: string, name: string) => {
-    try {
-      const docSnap = await getDoc(doc(db, 'classrooms', code));
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const savedPassword = data.password;
-        const localPwd = localStorage.getItem(`teacher_pwd_for_${code}`) || '';
-        
-        if (savedPassword && savedPassword !== localPwd) {
-          // If password mismatch, redirect to entry form
-          setTempClassCode(code);
-          setTempLoginPassword('');
-          alert("🔒 이 기록실은 교사용 보안 비밀번호 설정이 적용되어 있습니다. 아래 입장 칸에 해당 기록방의 교사용 비밀번호를 기입하여 로그인해 주세요!");
-          
-          // Scroll or focus class code entry block
-          const optElement = document.getElementById("existing_room_password_input");
-          if (optElement) {
-            optElement.focus();
-          }
-          return;
-        }
-
-        setClassCode(code);
-        setClassName(data.name || name);
-        if (savedPassword) {
-          setClassPassword(savedPassword);
-          localStorage.setItem('teacher_class_password', savedPassword);
-          localStorage.setItem(`teacher_pwd_for_${code}`, savedPassword);
-        } else {
-          setClassPassword('');
-          localStorage.removeItem('teacher_class_password');
-        }
-        localStorage.setItem('teacher_class_code', code);
-        localStorage.setItem('teacher_class_name', data.name || name);
-        
-        if (data.apiConfig) {
-          setApiConfig(data.apiConfig);
-          localStorage.setItem('ai_evaluator_config', JSON.stringify(data.apiConfig));
-        }
-      } else {
-        alert("해당 기록실이 원격 데이터베이스에 존재하지 않습니다.");
-      }
-    } catch (err) {
-      console.error("Recent classroom access error:", err);
-      setTempClassCode(code);
-      alert("원격 서버에서 기록실 보안 정보를 대조하지 못했습니다. 아래 입력창에서 비밀번호를 기재하여 재입장을 추진해 주세요.");
+    // SEC-2: 클라이언트 비밀번호 평문 대조를 제거하고, 입장 폼으로 안내하여 안전한 서버 로그인을 유도
+    setTempClassCode(code);
+    setTempLoginPassword('');
+    const optElement = document.getElementById("existing_room_password_input");
+    if (optElement) {
+      optElement.focus();
     }
   };
 
@@ -1152,8 +1093,9 @@ export default function App() {
                 AI 서비스 설정
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (window.confirm("현재 학급 기록실에서 퇴실하시겠습니까? (저장된 학생 기록 명단은 클라우드에 고스란히 온전히 보존되어 있으며, 학급코드로 언제든지 다시 로그인하실 수 있습니다!)")) {
+                    await logoutTeacher();
                     setClassCode('');
                     setClassName('');
                     setClassPassword('');

@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithCustomToken, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -41,6 +41,58 @@ export async function loginWithGoogle() {
     throw error;
   }
 }
+
+export function getApiBaseUrl(): string {
+  const isLocal = typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+  return (import.meta.env.VITE_API_BASE_URL as string) ||
+    (import.meta.env.VITE_FUNCTIONS_URL as string) ||
+    (isLocal
+      ? 'http://127.0.0.1:5001/behavior-77e8e/asia-northeast3/api'
+      : 'https://asia-northeast3-behavior-77e8e.cloudfunctions.net/api');
+}
+
+export async function getClassroomInfo(classCode: string): Promise<{ exists: boolean; name?: string }> {
+  const base = getApiBaseUrl();
+  const trimmed = classCode.trim().toUpperCase();
+  const res = await fetch(`${base}/classroom-info?code=${encodeURIComponent(trimmed)}`);
+  if (!res.ok) {
+    throw new Error('학급 기본 정보를 불러오지 못했습니다.');
+  }
+  return res.json();
+}
+
+export async function loginTeacherWithServer(
+  classCode: string,
+  password: string
+): Promise<{ success: boolean; name: string }> {
+  const base = getApiBaseUrl();
+
+  const res = await fetch(`${base}/auth/teacher`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ classCode, password }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.token) {
+    throw new Error(data.error || '교사 인증에 실패했습니다.');
+  }
+
+  await signInWithCustomToken(auth, data.token);
+
+  return {
+    success: true,
+    name: data.name || '우리 학급',
+  };
+}
+
+export async function logoutTeacher(): Promise<void> {
+  await signOut(auth);
+}
+
+export { signInWithCustomToken, signOut };
 
 // Error-Handling Interface from Firebase Integration Skill
 export enum OperationType {
