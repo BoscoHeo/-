@@ -18,13 +18,13 @@ const rawConfig = {
 
 // Fallback config if environment variables or config JSON are missing/empty
 const config = {
-  apiKey: rawConfig.apiKey || "AIzaSyDummyKeyForInitializationOnly",
-  authDomain: rawConfig.authDomain || "dummy.firebaseapp.com",
-  projectId: rawConfig.projectId || "dummy-project",
-  storageBucket: rawConfig.storageBucket || "dummy.appspot.com",
-  messagingSenderId: rawConfig.messagingSenderId || "000000000000",
-  appId: rawConfig.appId || "1:000000000000:web:dummy",
-  measurementId: rawConfig.measurementId || "",
+  apiKey: rawConfig.apiKey || "AIzaSyCjxgGh1tdQA91GXlJFFS6RU_dHp0ldMgw",
+  authDomain: rawConfig.authDomain || "behavior-77e8e.firebaseapp.com",
+  projectId: rawConfig.projectId || "behavior-77e8e",
+  storageBucket: rawConfig.storageBucket || "behavior-77e8e.firebasestorage.app",
+  messagingSenderId: rawConfig.messagingSenderId || "434754954924",
+  appId: rawConfig.appId || "1:434754954924:web:a741077b8e1c6954dfa109",
+  measurementId: rawConfig.measurementId || "G-CV3LGNC4WF",
   firestoreDatabaseId: rawConfig.firestoreDatabaseId || ""
 };
 
