@@ -8,25 +8,102 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // 1. 학급 루트 문서: 단일 깊이만 매칭 (하위 secret/students로 allow가 전파되지 않음)
-    // SEC-6 최소권한 Rules 전까지 기존 클라이언트 기능(학급 조회, 설정 동기화 등) 유지
+    // --- Helper Functions ---
+    // 1. Firebase Auth 인증 여부 확인
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // 2. 해당 학급의 담당 교사 권한 확인 (Custom Token claims: role == 'teacher', classCode 일치)
+    function isTeacher(classCode) {
+      return isAuthenticated()
+        && request.auth.token.role == 'teacher'
+        && request.auth.token.classCode == classCode;
+    }
+
+    // 3. 해당 학급의 특정 학생 본인 권한 확인 (Custom Token claims: role == 'student', classCode 및 studentId 일치)
+    function isStudent(classCode, studentId) {
+      return isAuthenticated()
+        && request.auth.token.role == 'student'
+        && request.auth.token.classCode == classCode
+        && request.auth.token.studentId == studentId;
+    }
+
+    // 4. 학생의 자기 문서 수정 시 허용 필드 화이트리스트 및 무결성 검증
+    // - 학생 ID 및 이름은 절대 변경 불가 (기존 문서 값과 동일해야 함)
+    // - pinHash, password, passwordHash 등 비밀번호/해시 필드는 절대 수정 불가
+    // - 학생이 수정 가능한 필드: selfDescription, strengths, weaknesses, feedback, status, evaluation, isFeedbackSent
+    // - 단, 교사가 작성한 evaluation 및 isFeedbackSent는 학생이 임의 변조하지 못하도록 기존 값과 일치해야 함
+    function isAllowedStudentUpdate(studentId) {
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      let allowedKeys = [
+        'selfDescription',
+        'strengths',
+        'weaknesses',
+        'feedback',
+        'status',
+        'evaluation',
+        'isFeedbackSent'
+      ];
+      return request.resource.data.id == resource.data.id
+        && request.resource.data.name == resource.data.name
+        && !affected.hasAny(['pinHash', 'password', 'passwordHash'])
+        && affected.hasOnly(allowedKeys)
+        && (!affected.hasAny(['evaluation']) || request.resource.data.evaluation == resource.data.evaluation)
+        && (!affected.hasAny(['isFeedbackSent']) || request.resource.data.isFeedbackSent == resource.data.isFeedbackSent);
+    }
+
+    // ==========================================
+    // 1. 학급 루트 문서 (/classrooms/{classCode})
+    // ==========================================
     match /classrooms/{classCode} {
-      allow read, write: if true;
+      // 교사만 본인 학급 문서 단건 조회(get) 허용. 학생 및 미인증자는 접근 차단 (classroom-info Cloud Functions 사용)
+      allow get: if isTeacher(classCode);
+      // 전체 학급 목록 열람(list/query) 전면 차단
+      allow list: if false;
+
+      // 신규 학급 생성: 기존에 없는 코드이며, 요청 본문의 code가 경로와 일치할 때 허용
+      allow create: if request.resource.data.code == classCode
+        && !exists(/databases/$(database)/documents/classrooms/$(classCode));
+
+      // 교사만 본인 학급 설정 변경 및 삭제 허용
+      allow update: if isTeacher(classCode) && request.resource.data.code == classCode;
+      allow delete: if isTeacher(classCode);
+
+      // ==========================================
+      // 2. 학생 서브컬렉션 (/classrooms/{classCode}/students/{studentId})
+      // ==========================================
+      match /students/{studentId} {
+        // 교사는 본인 학급 전체 학생 목록(list) 및 개별 학생(get) 조회 가능
+        // 학생은 본인 문서만 단건(get) 조회 가능하며, 전체 학생 목록(list) 조회는 전면 차단
+        allow get: if isTeacher(classCode) || isStudent(classCode, studentId);
+        allow list: if isTeacher(classCode);
+
+        // 학생 생성 및 삭제는 교사만 가능 (학생 신규 가입은 Cloud Functions Admin SDK가 담당)
+        allow create: if isTeacher(classCode);
+        allow delete: if isTeacher(classCode);
+
+        // 학생 정보 수정: 교사는 본인 학급 학생 수정 가능, 학생은 본인 문서의 허용 필드만 무결성 검증 후 수정 가능
+        allow update: if isTeacher(classCode)
+          || (isStudent(classCode, studentId) && isAllowedStudentUpdate(studentId));
+      }
+
+      // ==========================================
+      // 3. 보안 서브컬렉션 (/classrooms/{classCode}/secret/{document=**})
+      // ==========================================
+      // AI 설정 등 민감정보는 Client SDK 직접 접근 100% 영구 차단 (서버 Cloud Functions Admin SDK 전용)
+      match /secret/{document=**} {
+        allow read, write: if false;
+      }
     }
 
-    // 2. 학생 서브컬렉션: SEC-6 전까지 기존 학생/교사 읽기 및 쓰기 유지
-    match /classrooms/{classCode}/students/{studentId} {
-      allow read, write: if true;
-    }
-
-    // 3. 보안 서브컬렉션: Client SDK / 외부 REST 직접 접근 전면 차단 (서버 Cloud Functions Admin SDK 전용)
-    match /classrooms/{classCode}/secret/{document=**} {
-      allow read, write: if false;
-    }
-
-    // 4. 앱 연결 상태 확인용 테스트 경로
+    // ==========================================
+    // 4. 앱 연결 상태 확인용 테스트 경로 (/test/{document=**})
+    // ==========================================
+    // 연결 확인용 단건 읽기(get)만 허용하고, 불필요한 공개 쓰기(write) 및 목록(list)은 전면 차단
     match /test/{document=**} {
-      allow read, write: if true;
+      allow get: if true;
+      allow list, write: if false;
     }
   }
 }
