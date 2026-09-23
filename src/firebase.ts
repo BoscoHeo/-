@@ -67,6 +67,33 @@ export function getApiBaseUrl(): string {
       : 'https://asia-northeast3-behavior-77e8e.cloudfunctions.net/api');
 }
 
+export async function createClassroomWithServer(
+  name: string,
+  password: string
+): Promise<{ success: boolean; classCode: string; name: string }> {
+  const base = getApiBaseUrl();
+
+  const res = await fetch(`${base}/classroom/create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, password }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.token || !data.classCode) {
+    throw new Error(data.error || '학급 개설에 실패했습니다.');
+  }
+
+  // 발급받은 Teacher Custom Token으로 Firebase Auth 세션 즉시 수립
+  await signInWithCustomToken(auth, data.token);
+
+  return {
+    success: true,
+    classCode: data.classCode,
+    name: data.name || name,
+  };
+}
+
 export async function getClassroomInfo(classCode: string): Promise<{ exists: boolean; name?: string }> {
   const base = getApiBaseUrl();
   const trimmed = classCode.trim().toUpperCase();

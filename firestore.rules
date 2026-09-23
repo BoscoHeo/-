@@ -59,12 +59,8 @@ service cloud.firestore {
     match /classrooms/{classCode} {
       // 교사만 본인 학급 문서 단건 조회(get) 허용. 학생 및 미인증자는 접근 차단 (classroom-info Cloud Functions 사용)
       allow get: if isTeacher(classCode);
-      // 전체 학급 목록 열람(list/query) 전면 차단
-      allow list: if false;
-
-      // 신규 학급 생성: 기존에 없는 코드이며, 요청 본문의 code가 경로와 일치할 때 허용
-      allow create: if request.resource.data.code == classCode
-        && !exists(/databases/$(database)/documents/classrooms/$(classCode));
+      // 전체 학급 목록 열람(list) 및 클라이언트 직접 생성(create) 전면 영구 차단 (신규 학급 생성은 Cloud Functions Admin SDK 전용)
+      allow list, create: if false;
 
       // 교사만 본인 학급 설정 변경 및 삭제 허용
       allow update: if isTeacher(classCode) && request.resource.data.code == classCode;

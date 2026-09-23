@@ -13,7 +13,7 @@ import ExcelPasteModal from './components/ExcelPasteModal';
 import StudentPortal from './components/StudentPortal';
 
 // Direct Firebase cloud connection
-import { db, isFirebaseConfigured, loginTeacherWithServer, logoutTeacher, saveAiConfigWithServer, getAiConfigWithServer } from './firebase';
+import { db, isFirebaseConfigured, createClassroomWithServer, loginTeacherWithServer, logoutTeacher, saveAiConfigWithServer, getAiConfigWithServer } from './firebase';
 import { collection, doc, onSnapshot, setDoc, deleteDoc, getDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { generateAIConsult } from './utils/ai';
 
@@ -216,39 +216,22 @@ export default function App() {
       return;
     }
 
-    // Generate random 6 characters code
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let code = '';
-    for (let i = 0; i < 6; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-
     try {
-      await setDoc(doc(db, 'classrooms', code), {
-        code,
-        name: tempClassName.trim(),
-        createdAt: new Date().toISOString(),
-        apiConfig: apiConfig,
-        password: tempCreatePassword.trim() // 교사용 관리 비밀번호 저장
-      });
-
-      // SEC-2: 방 개설 후 서버 로그인 및 Firebase Auth Custom Token 세션 수립
-      try {
-        await loginTeacherWithServer(code, tempCreatePassword.trim());
-      } catch (authErr) {
-        console.warn("기록실 개설 후 자동 인증 세션 수립 알림:", authErr);
-      }
+      // 서버에서 고유 코드 생성, scrypt 비밀번호 해싱, 원자적 저장 및 Teacher Custom Token 발급을 원스톱 수행
+      const result = await createClassroomWithServer(tempClassName.trim(), tempCreatePassword.trim());
+      const code = result.classCode;
+      const createdName = result.name;
 
       setClassCode(code);
-      setClassName(tempClassName.trim());
+      setClassName(createdName);
       setClassPassword(''); // 브라우저 메모리에 평문 비밀번호 보관 제거
       localStorage.removeItem('teacher_class_password');
       localStorage.removeItem(`teacher_pwd_for_${code}`);
       localStorage.setItem('teacher_class_code', code);
-      localStorage.setItem('teacher_class_name', tempClassName.trim());
+      localStorage.setItem('teacher_class_name', createdName);
 
       // Update history list
-      const updatedHistory = [{ code, name: tempClassName.trim() }, ...recentClasses.filter(c => c.code !== code)].slice(0, 10);
+      const updatedHistory = [{ code, name: createdName }, ...recentClasses.filter(c => c.code !== code)].slice(0, 10);
       setRecentClasses(updatedHistory);
       localStorage.setItem('teacher_class_history', JSON.stringify(updatedHistory));
       
@@ -256,9 +239,9 @@ export default function App() {
       setTempCreatePassword('');
       setTempLoginPassword('');
 
-    } catch (err) {
-      console.error("Error creating classroom in Firestore:", err);
-      alert("기록실 개설 중 오류가 발생했습니다. 네트워크 환경을 점검해 보세요.");
+    } catch (err: any) {
+      console.error("Error creating classroom with server:", err);
+      alert(err.message || "기록실 개설 중 오류가 발생했습니다. 네트워크 환경을 점검해 보세요.");
     }
   };
 

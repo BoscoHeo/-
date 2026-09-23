@@ -103,6 +103,131 @@ function clearRateLimit(key: string): void {
   loginAttempts.delete(key);
 }
 
+// 4-1. 신규 학급 개설 레이트 리미터 (IP당 1분 3회 제한으로 스팸 및 코드 선점 공격 방어)
+const classroomCreateLimits = new Map<string, RateLimitEntry>();
+
+function checkCreateRateLimit(key: string): boolean {
+  const now = Date.now();
+  const entry = classroomCreateLimits.get(key);
+  if (!entry || now > entry.resetAt) {
+    classroomCreateLimits.set(key, { attempts: 1, resetAt: now + 60000 });
+    return true;
+  }
+  if (entry.attempts >= 3) {
+    return false;
+  }
+  entry.attempts += 1;
+  return true;
+}
+
+// 암호학적으로 안전한 6자리 학급 코드 생성 헬퍼
+const CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+function generateSecureClassCode(): string {
+  const bytes = crypto.randomBytes(6);
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += CODE_CHARS[bytes[i] % CODE_CHARS.length];
+  }
+  return code;
+}
+
+// 4-2. 공통 비즈니스 로직 핸들러: classroom-create (POST /api/classroom/create)
+// 클라이언트의 직접적인 Firestore create 및 평문 비밀번호 저장을 원천 차단하고 서버에서 원자적으로 생성합니다.
+async function handleClassroomCreate(req: Request, res: Response): Promise<void> {
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "허용되지 않은 HTTP 메서드입니다." });
+    return;
+  }
+
+  const { name, password } = req.body || {};
+
+  // 1) 입력값 유효성 검증
+  if (!name || typeof name !== "string" || !password || typeof password !== "string") {
+    res.status(400).json({ error: "학급 명칭과 교사용 비밀번호를 모두 입력해 주세요." });
+    return;
+  }
+
+  const trimmedName = name.trim();
+  const trimmedPassword = password.trim();
+
+  // 제어문자 및 길이 검증
+  if (trimmedName.length < 1 || trimmedName.length > 50 || /[\u0000-\u001F\u007F]/.test(trimmedName)) {
+    res.status(400).json({ error: "학급 명칭은 1자 이상 50자 이하의 올바른 문자열이어야 합니다." });
+    return;
+  }
+
+  if (trimmedPassword.length < 4 || trimmedPassword.length > 64) {
+    res.status(400).json({ error: "교사용 관리 비밀번호는 최소 4자 이상 64자 이하로 설정해 주세요." });
+    return;
+  }
+
+  // 2) 레이트 리밋 검사 (클라이언트 IP 기준 1분 3회 생성 제한)
+  const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown";
+  const rateLimitKey = `create:${clientIp}`;
+  if (!checkCreateRateLimit(rateLimitKey)) {
+    res.status(429).json({ error: "학급 개설 시도가 너무 많습니다. 1분 후 다시 시도해 주세요." });
+    return;
+  }
+
+  try {
+    // 3) 충돌 방지 고유 classCode 생성 (최대 5회 재시도)
+    let selectedCode = "";
+    let targetDocRef: FirebaseFirestore.DocumentReference | null = null;
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidateCode = generateSecureClassCode();
+      const docRef = db.collection("classrooms").doc(candidateCode);
+      const snap = await docRef.get();
+      if (!snap.exists) {
+        selectedCode = candidateCode;
+        targetDocRef = docRef;
+        break;
+      }
+    }
+
+    if (!selectedCode || !targetDocRef) {
+      res.status(500).json({ error: "새 학급 코드를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+      return;
+    }
+
+    // 4) scrypt 비밀번호 해싱 (평문 비밀번호는 일절 저장하지 않음)
+    const passwordHash = await hashPassword(trimmedPassword);
+
+    // 5) Firestore Admin SDK로 원자적 생성 (create 메소드로 중복 덮어쓰기 절대 방지)
+    const newClassroomData = {
+      code: selectedCode,
+      name: trimmedName,
+      createdAt: new Date().toISOString(),
+      passwordHash: passwordHash,
+      apiConfig: {
+        provider: "gemini",
+        model: "gemini-2.5-flash",
+        hasKey: false,
+      },
+    };
+
+    await targetDocRef.create(newClassroomData);
+
+    // 6) 생성 즉시 Teacher Custom Token 발급 (단일 왕복으로 교사 세션 즉시 수립 가능)
+    const uid = `teacher_${selectedCode}`;
+    const claims = {
+      role: "teacher",
+      classCode: selectedCode,
+    };
+    const customToken = await getAuth().createCustomToken(uid, claims);
+
+    res.status(200).json({
+      success: true,
+      classCode: selectedCode,
+      name: trimmedName,
+      token: customToken,
+    });
+  } catch (error) {
+    console.error("학급 개설 처리 중 서버 오류 발생:", error instanceof Error ? error.message : "알 수 없는 오류");
+    res.status(500).json({ error: "학급 개설 처리 중 서버 오류가 발생했습니다." });
+  }
+}
+
 // 5. 공통 비즈니스 로직 핸들러: classroom-info (GET)
 // 학급의 존재 여부와 학급명만 안전하게 반환하며, 비밀번호/API키/학생정보는 일절 반환하지 않습니다.
 async function handleClassroomInfo(req: Request, res: Response): Promise<void> {
@@ -755,6 +880,9 @@ app.use(express.json());
 app.use(cors(corsOptions));
 
 // 엔드포인트 라우트 등록
+app.post("/classroom/create", handleClassroomCreate);
+app.post("/api/classroom/create", handleClassroomCreate);
+
 app.get("/classroom-info", handleClassroomInfo);
 app.get("/api/classroom-info", handleClassroomInfo);
 
