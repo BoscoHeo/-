@@ -16,9 +16,22 @@ const rawConfig = {
   firestoreDatabaseId: (import.meta.env.VITE_FIREBASE_DATABASE_ID as string) || firebaseConfig.firestoreDatabaseId
 };
 
+const BEHAVIOR_OFFICIAL_FIREBASE_API_KEY = "AIzaSyCjxgGh1tdQA91GXlJFFS6RU_dHp0ldMgw";
+
+function sanitizeFirebaseApiKey(key?: string): string {
+  if (!key || key === "AIzaSyDummyKeyForInitializationOnly") {
+    return BEHAVIOR_OFFICIAL_FIREBASE_API_KEY;
+  }
+  // Cloudflare Pages 환경 변수에 등록된 대문자 'L' 오타(GXL)를 정상 소문자 'l'(GXl)로 자동 보정
+  if (key.includes("91GXLJFF") || key === "AIzaSyCjxgGh1tdQA91GXLJFFS6RU_dHp0ldMgw") {
+    return BEHAVIOR_OFFICIAL_FIREBASE_API_KEY;
+  }
+  return key;
+}
+
 // Fallback config if environment variables or config JSON are missing/empty
 const config = {
-  apiKey: rawConfig.apiKey || "AIzaSyCjxgGh1tdQA91GXlJFFS6RU_dHp0ldMgw",
+  apiKey: sanitizeFirebaseApiKey(rawConfig.apiKey),
   authDomain: rawConfig.authDomain || "behavior-77e8e.firebaseapp.com",
   projectId: rawConfig.projectId || "behavior-77e8e",
   storageBucket: rawConfig.storageBucket || "behavior-77e8e.firebasestorage.app",
