@@ -9,3 +9,4 @@ coverage/
 firebase-applet-config.json
 .antigravity/
 .vscode/
+.backup/
